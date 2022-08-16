@@ -81,6 +81,10 @@
 #include "itemprops.hpp"
 #endif // Pandas_Item_Properties
 
+#ifdef Pandas_Database_MobItem_FixedRatio
+#include "mobdrop.hpp"
+#endif // Pandas_Database_MobItem_FixedRatio
+
 using namespace rathena;
 
 const int64 SCRIPT_INT_MIN = INT64_MIN;
@@ -247,6 +251,13 @@ static char *str_buf;
 static int str_size = 0; // size of the buffer
 static int str_pos = 0; // next position to be assigned
 
+#ifdef Pandas_ScriptEngine_AddStr_Realloc_Memory
+// str_data 每次被重新分配时, 增加多少个字节的容量
+#define STR_DATA_INCREASING_SIZE 128 * 4
+
+// str_buf  每次被重新分配时, 增加多少个字节的容量
+#define STR_BUF_INCREASING_SIZE 256 * 32
+#endif // Pandas_ScriptEngine_AddStr_Realloc_Memory
 
 // Using a prime number for SCRIPT_HASH_SIZE should give better distributions
 #define SCRIPT_HASH_SIZE 1021
@@ -344,27 +355,27 @@ struct Script_Config script_config = {
 #endif // Pandas_NpcFilter_ONECLICK_IDENTIFY
 
 #ifdef Pandas_NpcFilter_GUILDCREATE
-	"OnPCGuildCreateFilter",	// NPCF_GUILDCREATE		// guildcreate_filter_name	// 当玩家准备创建公会时触发过滤器 [聽風]
+	"OnPCGuildCreateFilter",	// NPCF_GUILDCREATE		// guildcreate_filter_name	// 当玩家准备创建公会时触发过滤器
 #endif // Pandas_NpcFilter_GUILDCREATE
 
 #ifdef Pandas_NpcFilter_GUILDJOIN
-	"OnPCGuildJoinFilter",	// NPCF_GUILDJOIN		// guildjoin_filter_name	// 当玩家即将加入公会时触发过滤器 [聽風]
+	"OnPCGuildJoinFilter",	// NPCF_GUILDJOIN		// guildjoin_filter_name	// 当玩家即将加入公会时触发过滤器
 #endif // Pandas_NpcFilter_GUILDJOIN
 
 #ifdef Pandas_NpcFilter_GUILDLEAVE
-	"OnPCGuildLeaveFilter",	// NPCF_GUILDLEAVE		// guildleave_filter_name	// 当玩家准备离开公会时触发过滤器 [聽風]
+	"OnPCGuildLeaveFilter",	// NPCF_GUILDLEAVE		// guildleave_filter_name	// 当玩家准备离开公会时触发过滤器
 #endif // Pandas_NpcFilter_GUILDLEAVE
 
 #ifdef Pandas_NpcFilter_PARTYCREATE
-	"OnPCPartyCreateFilter",	// NPCF_PARTYCREATE		// partycreate_filter_name	// 当玩家准备创建队伍时触发过滤器 [聽風]
+	"OnPCPartyCreateFilter",	// NPCF_PARTYCREATE		// partycreate_filter_name	// 当玩家准备创建队伍时触发过滤器
 #endif // Pandas_NpcFilter_PARTYCREATE
 
 #ifdef Pandas_NpcFilter_PARTYJOIN
-	"OnPCPartyJoinFilter",	// NPCF_PARTYJOIN		// partyjoin_filter_name	// 当玩家即将加入队伍时触发过滤器 [聽風]
+	"OnPCPartyJoinFilter",	// NPCF_PARTYJOIN		// partyjoin_filter_name	// 当玩家即将加入队伍时触发过滤器
 #endif // Pandas_NpcFilter_PARTYJOIN
 
 #ifdef Pandas_NpcFilter_PARTYLEAVE
-	"OnPCPartyLeaveFilter",	// NPCF_PARTYLEAVE		// partyleave_filter_name	// 当玩家准备离开队伍时触发过滤器 [聽風]
+	"OnPCPartyLeaveFilter",	// NPCF_PARTYLEAVE		// partyleave_filter_name	// 当玩家准备离开队伍时触发过滤器
 #endif // Pandas_NpcFilter_PARTYLEAVE
 
 #ifdef Pandas_NpcFilter_DROPITEM
@@ -374,6 +385,14 @@ struct Script_Config script_config = {
 #ifdef Pandas_NpcFilter_CLICKTOMB
 	"OnPCClickTombFilter",	// NPCF_CLICKTOMB		// clicktomb_filter_name	// 当玩家点击魔物墓碑时触发过滤器
 #endif // Pandas_NpcFilter_CLICKTOMB
+
+#ifdef Pandas_NpcFilter_STORAGE_ADD
+	"OnPCStorageAddFilter",	// NPCF_STORAGE_ADD		// storage_add_filter_name	// 当玩家准备将道具存入仓库时触发过滤器
+#endif // Pandas_NpcFilter_STORAGE_ADD
+
+#ifdef Pandas_NpcFilter_STORAGE_DEL
+	"OnPCStorageDelFilter",	// NPCF_STORAGE_DEL		// storage_del_filter_name	// 当玩家准备将道具取出仓库时触发过滤器
+#endif // Pandas_NpcFilter_STORAGE_DEL
 	// PYHELP - NPCEVENT - INSERT POINT - <Section 5>
 
 	/************************************************************************/
@@ -456,6 +475,10 @@ struct Script_Config script_config = {
 #ifdef Pandas_NpcExpress_PC_TALK
 		"OnPCTalkExpress",	// NPCX_PC_TALK		// pc_talk_express_name	// 当玩家往聊天框发送信息时触发实时事件 [人鱼姬的思念]
 #endif // Pandas_NpcExpress_PC_TALK
+
+#ifdef Pandas_NpcExpress_PCHARMED
+	"OnPCHarmedExpress",	// NPCX_PCHARMED		// pcharmed_express_name	// 当玩家受到伤害并即将进行结算时触发实时事件 [人鱼姬的思念]
+#endif // Pandas_NpcExpress_PCHARMED
 	// PYHELP - NPCEVENT - INSERT POINT - <Section 17>
 
 	// NPC related
@@ -917,9 +940,15 @@ int add_str(const char* p)
 	// grow list if neccessary
 	if( str_num >= str_data_size )
 	{
+#ifndef Pandas_ScriptEngine_AddStr_Realloc_Memory
 		str_data_size += 128;
 		RECREATE(str_data,struct str_data_struct,str_data_size);
 		memset(str_data + (str_data_size - 128), '\0', 128);
+#else
+		str_data_size += STR_DATA_INCREASING_SIZE;
+		RECREATE(str_data,struct str_data_struct,str_data_size);
+		memset(str_data + (str_data_size - STR_DATA_INCREASING_SIZE), '\0', STR_DATA_INCREASING_SIZE);
+#endif // Pandas_ScriptEngine_AddStr_Realloc_Memory
 	}
 
 	len=(int)strlen(p);
@@ -927,9 +956,27 @@ int add_str(const char* p)
 	// grow string buffer if neccessary
 	while( str_pos+len+1 >= str_size )
 	{
+#ifndef Pandas_ScriptEngine_AddStr_Realloc_Memory
 		str_size += 256;
 		RECREATE(str_buf,char,str_size);
 		memset(str_buf + (str_size - 256), '\0', 256);
+#else
+		str_size += STR_BUF_INCREASING_SIZE;
+		RECREATE(str_buf,char,str_size);
+		memset(str_buf + (str_size - STR_BUF_INCREASING_SIZE), '\0', STR_BUF_INCREASING_SIZE);
+#endif // Pandas_ScriptEngine_AddStr_Realloc_Memory
+
+#ifdef Pandas_ScriptEngine_Relocation_Funcname_After_StrBuf_Realloc
+		DBIterator* iter = db_iterator(st_db);
+		struct script_state* st = nullptr;
+
+		for (st = static_cast<script_state*>(dbi_first(iter)); dbi_exists(iter); st = static_cast<script_state*>(dbi_next(iter))) {
+			struct script_data* data = script_getdata(st, 0);
+			st->funcname = reference_getname(data);
+		}
+
+		dbi_destroy(iter);
+#endif // Pandas_ScriptEngine_Relocation_Funcname_After_StrBuf_Realloc
 	}
 
 	safestrncpy(str_buf+str_pos, p, len+1);
@@ -3859,6 +3906,11 @@ struct script_state* script_alloc_state(struct script_code* rootscript, int pos,
 	st->unlockcmd = 0;
 #endif // Pandas_ScriptCommand_UnlockCmd
 
+#ifdef Pandas_ScriptCommand_GetInventoryList
+	st->waiting_premium_storage = 0;
+	st->waiting_guild_storage = 0;
+#endif // Pandas_ScriptCommand_GetInventoryList
+
 	if( st->script->instances != USHRT_MAX )
 		st->script->instances++;
 	else {
@@ -5442,6 +5494,107 @@ void script_both_setregstr(struct script_state* st, const char* varname_without_
 		varid = (isarray ? reference_uid(add_str(varname.c_str()), index) : add_str(varname.c_str()));
 		pc_setregstr(sd, varid, value);
 	}
+}
+
+//************************************
+// Method:      script_getstorage
+// Description: 根据指令名称来获取不同的存储空间
+// Parameter:   struct script_state * st
+// Parameter:   struct map_session_data * sd
+// Parameter:   struct s_storage * * stor
+// Parameter:   struct item * * inventory
+// Parameter:   int stor_id
+// Returns:     bool
+// Author:      Sola丶小克(CairoLee)  2022/08/06 12:11
+//************************************
+bool script_getstorage(struct script_state* st, struct map_session_data* sd, struct s_storage** stor, struct item** inventory, int stor_id = 0) {
+	nullpo_retr(false, st);
+	nullpo_retr(false, sd);
+	nullpo_retr(false, stor);
+	nullpo_retr(false, inventory);
+	
+	const char* command = script_getfuncname(st);
+	
+	if (strstr(command, "cart")) {
+		if (!pc_iscarton(sd)) {
+			ShowError("buildin_%s: player doesn't have cart (CID: %d).\n", command, sd->status.char_id);
+			return false;
+		}
+		*stor = &sd->cart;
+		*inventory = (*stor)->u.items_cart;
+	}
+	else if (strstr(command, "guildstorage")) {
+		if (!sd->status.guild_id || !sd->guild) {
+			ShowError("buildin_%s: player doesn't join the guild (CID: %d).\n", command, sd->status.char_id);
+			return false;
+		}
+
+#ifdef OFFICIAL_GUILD_STORAGE
+		if (!guild_checkskill(sd->guild, GD_GUILD_STORAGE)) {
+			ShowError("buildin_%s: player's guild has not learned the GD_GUILD_STORAGE skill (CID: %d).\n", command, sd->status.char_id);
+			return false;
+		}
+#endif // OFFICIAL_GUILD_STORAGE
+
+		if (guild2storage2(sd->status.guild_id) || st->waiting_guild_storage) {
+			// 如果该公会的仓库数据已经在地图服务器内存中, 则直接使用
+			*stor = guild2storage2(sd->status.guild_id);
+			if (!(*stor)) {
+				ShowError("buildin_%s: player's guild does not have a guild storage (CID: %d | Guild ID: %d).\n", command, sd->status.char_id, sd->status.guild_id);
+				return false;
+			}
+			*inventory = (*stor)->u.items_guild;
+
+			st->waiting_guild_storage = 0;
+			st->state = RUN;
+		}
+		else if (!st->waiting_guild_storage) {
+			// 否则, 需要先发送请求给角色服务器, 用于加载指定的公会仓库内容
+			st->state = RERUNLINE;
+			st->waiting_guild_storage = 1;
+			intif_request_guild_storage(sd->status.account_id, sd->status.guild_id);
+		}
+		else if (!guild2storage2(sd->status.guild_id)) {
+			ShowError("buildin_%s: player's guild does not have a guild storage (CID: %d | Guild ID: %d).\n", command, sd->status.char_id, sd->status.guild_id);
+			return false;
+		}
+	}
+	else if (strstr(command, "storage")) {
+		if (stor_id == 0) {
+			*stor = &sd->storage;
+			*inventory = (*stor)->u.items_storage;
+		}
+		else if (!storage_exists(stor_id)) {
+			ShowError("buildin_%s: Invalid storage id '%d'!\n", command, stor_id);
+			return false;
+		}
+		else {
+			if (sd->premiumStorage.stor_id == stor_id || st->waiting_premium_storage) {
+				// 如果现有的 premiumStorage 就是我们期望的拓展仓库
+				// 参考 storage_premiumStorage_load 的逻辑, 此时的 premiumStorage 内容可信
+				*stor = &sd->premiumStorage;
+				*inventory = (*stor)->u.items_storage;
+
+				st->waiting_premium_storage = 0;
+				st->state = RUN;
+			}
+			else if (!st->waiting_premium_storage) {
+				// 否则, 需要先发送请求给角色服务器, 用于加载指定的拓展仓库内容
+				st->state = RERUNLINE;
+				st->waiting_premium_storage = 1;
+				intif_storage_request(sd, TABLE_STORAGE, stor_id, STOR_MODE_ALL);
+			}
+		}
+	}
+	else {
+		if (!strstr(command, "inventory")) {
+			ShowWarning("%s: unknow function command: '%s', defaulting to inventory.\n", __func__, command);
+		}
+		*stor = &sd->inventory;
+		*inventory = (*stor)->u.items_inventory;
+	}
+
+	return true;
 }
 
 #endif // Pandas_ScriptCommands
@@ -7793,9 +7946,9 @@ static int script_countitem_sub(struct item *items, std::shared_ptr<item_data> i
 		for (int i = 0; i < size; i++) {
 			item *itm = &items[i];
 
-			if (itm == nullptr || itm->nameid == 0 || itm->amount < 1 || (!rental && itm->expire_time > 0))
+			if (itm == nullptr || itm->nameid == 0 || itm->amount < 1)
 				continue;
-			if (itm->nameid == nameid)
+			if (itm->nameid == nameid && ((rental && itm->expire_time > 0) || (!rental && itm->expire_time == 0)))
 				count += itm->amount;
 		}
 	} else { // For expanded functions
@@ -7827,9 +7980,11 @@ static int script_countitem_sub(struct item *items, std::shared_ptr<item_data> i
 		for (int i = 0; i < size; i++) {
 			item *itm = &items[i];
 
-			if (itm == nullptr || itm->nameid == 0 || itm->amount < 1 || (!rental && items[i].expire_time > 0))
+			if (itm == nullptr || itm->nameid == 0 || itm->amount < 1)
 				continue;
 			if (itm->nameid != it.nameid || itm->identify != it.identify || itm->refine != it.refine || itm->attribute != it.attribute)
+				continue;
+			if ((!rental && itm->expire_time > 0) || (rental && itm->expire_time == 0))
 				continue;
 			if (memcmp(it.card, itm->card, sizeof(it.card)))
 				continue;
@@ -11670,10 +11825,6 @@ BUILDIN_FUNC(monster)
 	int16 m;
 	int i;
 
-#ifdef Pandas_ScriptCommand_BossMonster
-	const char* command = script_getfuncname(st);
-#endif // Pandas_ScriptCommand_BossMonster
-
 	if (script_hasdata(st, 8)) {
 		event = script_getstr(st, 8);
 		check_event(st, event);
@@ -11685,7 +11836,7 @@ BUILDIN_FUNC(monster)
 #ifndef Pandas_ScriptCommand_BossMonster
 			ShowWarning("buildin_monster: Attempted to spawn non-existing size %d for monster class %d\n", size, class_);
 #else
-			ShowWarning("buildin_%s: Attempted to spawn non-existing size %d for monster class %d\n", command, size, class_);
+			ShowWarning("buildin_%s: Attempted to spawn non-existing size %d for monster class %d\n", script_getfuncname(st), size, class_);
 #endif // Pandas_ScriptCommand_BossMonster
 			return SCRIPT_CMD_FAILURE;
 		}
@@ -11697,7 +11848,7 @@ BUILDIN_FUNC(monster)
 #ifndef Pandas_ScriptCommand_BossMonster
 			ShowWarning("buildin_monster: Attempted to spawn non-existing ai %d for monster class %d\n", ai, class_);
 #else
-			ShowWarning("buildin_%s: Attempted to spawn non-existing ai %d for monster class %d\n", command, ai, class_);
+			ShowWarning("buildin_%s: Attempted to spawn non-existing ai %d for monster class %d\n", script_getfuncname(st), ai, class_);
 #endif // Pandas_ScriptCommand_BossMonster
 			return SCRIPT_CMD_FAILURE;
 		}
@@ -11707,7 +11858,7 @@ BUILDIN_FUNC(monster)
 #ifndef Pandas_ScriptCommand_BossMonster
 		ShowWarning("buildin_monster: Attempted to spawn non-existing monster class %d\n", class_);
 #else
-		ShowWarning("buildin_%s: Attempted to spawn non-existing monster class %d\n", command, class_);
+		ShowWarning("buildin_%s: Attempted to spawn non-existing monster class %d\n", script_getfuncname(st), class_);
 #endif // Pandas_ScriptCommand_BossMonster
 		return SCRIPT_CMD_FAILURE;
 	}
@@ -11723,7 +11874,7 @@ BUILDIN_FUNC(monster)
 #ifndef Pandas_ScriptCommand_BossMonster
 		int mobid = mob_once_spawn(sd, m, x, y, str, class_, 1, event, size, ai);
 #else
-		int mobid = mob_once_spawn(sd, m, x, y, str, class_, 1, event, size, ai, (!strcmp(command, "boss_monster")) ? 1 : 0);
+		int mobid = mob_once_spawn(sd, m, x, y, str, class_, 1, event, size, ai, (!strcmp(script_getfuncname(st), "boss_monster")) ? 1 : 0);
 #endif // Pandas_ScriptCommand_BossMonster
 
 		if (mobid)
@@ -12586,7 +12737,7 @@ BUILDIN_FUNC(getmapusers)
  *------------------------------------------*/
 static int buildin_getareausers_sub(struct block_list *bl,va_list ap)
 {
-	int *users=va_arg(ap,int *);
+	int *users = va_arg(ap, int *);
 	(*users)++;
 	return SCRIPT_CMD_SUCCESS;
 }
@@ -12594,7 +12745,8 @@ static int buildin_getareausers_sub(struct block_list *bl,va_list ap)
 BUILDIN_FUNC(getareausers)
 {
 	const char *str;
-	int16 m,x0,y0,x1,y1,users=0; //doubt we can have more then 32k users on
+	int16 m,x0,y0,x1,y1;
+	int users = 0;
 	str=script_getstr(st,2);
 	x0=script_getnum(st,3);
 	y0=script_getnum(st,4);
@@ -15100,13 +15252,10 @@ BUILDIN_FUNC(getitemname)
  *------------------------------------------*/
 BUILDIN_FUNC(getitemslots)
 {
-	struct item_data *i_data;
-
 	t_itemid item_id=script_getnum(st,2);
+	std::shared_ptr<item_data> i_data = item_db.find(item_id);
 
-	i_data = itemdb_exists(item_id);
-
-	if (i_data)
+	if (i_data != nullptr)
 		script_pushint(st,i_data->slots);
 	else
 		script_pushint(st,-1);
@@ -15486,6 +15635,8 @@ BUILDIN_FUNC(petloot)
 	pd->loot->weight = 0;
 	return SCRIPT_CMD_SUCCESS;
 }
+
+#ifndef Pandas_ScriptCommand_GetInventoryList
 /*==========================================
  * Set arrays with info of all sd inventory :
  * @inventorylist_id, @inventorylist_amount, @inventorylist_equip,
@@ -15529,18 +15680,134 @@ BUILDIN_FUNC(getinventorylist)
 			}
 			pc_setreg(sd,reference_uid(add_str("@inventorylist_tradable"), j),pc_can_trade_item(sd, i));
 			pc_setreg(sd,reference_uid(add_str("@inventorylist_favorite"), j),sd->inventory.u.items_inventory[i].favorite);
-#ifdef Pandas_ScriptResults_GetInventoryList
-			// 字符串数组 - @inventorylist_uid$ 用于保存道具的唯一编号
-			uint64 _tmp_for_gcc = sd->inventory.u.items_inventory[i].unique_id;
-			std::string unique_id = boost::str(boost::format("%1%") % _tmp_for_gcc);
-			pc_setregstr(sd, reference_uid(add_str("@inventorylist_uid$"), j), unique_id.c_str());
-#endif // Pandas_ScriptResults_GetInventoryList
 			j++;
 		}
 	}
 	pc_setreg(sd,add_str("@inventorylist_count"),j);
 	return SCRIPT_CMD_SUCCESS;
 }
+#else
+/* ===========================================================
+ * getinventorylist {<角色编号>{,<想查询的数据类型>}};
+ * getcartlist {<角色编号>{,<想查询的数据类型>}};
+ * getguildstoragelist {<角色编号>{,<想查询的数据类型>}};
+ * getstoragelist {<角色编号>{,<想查询的数据类型>{,<仓库编号>}}};
+ * -----------------------------------------------------------*/
+BUILDIN_FUNC(getinventorylist) {
+	struct map_session_data* sd = nullptr;
+	char card_var[NAME_LENGTH] = { 0 }, randopt_var[50] = { 0 };
+	int j = 0, k = 0;
+
+	if (!script_charid2sd(2, sd)) {
+		return SCRIPT_CMD_FAILURE;
+	}
+
+	uint32 query_flag = INV_ALL;
+	if (script_hasdata(st, 3))
+		query_flag = script_getnum(st, 3);
+
+	struct s_storage* stor = nullptr;
+	struct item* inventory = nullptr;
+	int stor_id = (script_hasdata(st, 4) ? script_getnum(st, 4) : 0);
+
+	pc_setreg(sd, add_str("@inventorylist_count"), 0);
+	
+	if (!script_getstorage(st, sd, &stor, &inventory, stor_id)) {
+		return SCRIPT_CMD_FAILURE;
+	}
+
+	if (st->state == RERUNLINE) {
+		return SCRIPT_CMD_SUCCESS;
+	}
+
+	if (!stor || !inventory) {
+		const char* command = script_getfuncname(st);
+		ShowError("buildin_%s: cannot read inventory or storage data.\n", command);
+		return SCRIPT_CMD_FAILURE;
+	}
+
+#define setreg(flag, arrayname, value)\
+	{ \
+		if ((query_flag & flag) == flag) \
+			pc_setreg(sd, reference_uid(add_str(arrayname), j), value); \
+	}
+#define setregstr(flag, arrayname, value)\
+	{ \
+		if ((query_flag & flag) == flag) \
+			pc_setregstr(sd, reference_uid(add_str(arrayname), j), value); \
+	}
+
+	script_cleararray_pc(sd, "@inventorylist_id");
+	script_cleararray_pc(sd, "@inventorylist_idx");
+	script_cleararray_pc(sd, "@inventorylist_amount");
+	script_cleararray_pc(sd, "@inventorylist_equip");
+	script_cleararray_pc(sd, "@inventorylist_refine");
+	script_cleararray_pc(sd, "@inventorylist_identify");
+	script_cleararray_pc(sd, "@inventorylist_attribute");
+	for (k = 0; k < MAX_SLOTS; k++) {
+		sprintf(card_var, "@inventorylist_card%d", k + 1);
+		script_cleararray_pc(sd, card_var);
+	}
+	script_cleararray_pc(sd, "@inventorylist_expire");
+	script_cleararray_pc(sd, "@inventorylist_bound");
+	script_cleararray_pc(sd, "@inventorylist_enchantgrade");
+	for (k = 0; k < MAX_ITEM_RDM_OPT; k++) {
+		sprintf(randopt_var, "@inventorylist_option_id%d", k + 1);
+		script_cleararray_pc(sd, randopt_var);
+		sprintf(randopt_var, "@inventorylist_option_value%d", k + 1);
+		script_cleararray_pc(sd, randopt_var);
+		sprintf(randopt_var, "@inventorylist_option_parameter%d", k + 1);
+		script_cleararray_pc(sd, randopt_var);
+	}
+	script_cleararray_pc(sd, "@inventorylist_tradable");
+	script_cleararray_pc(sd, "@inventorylist_favorite");
+	script_cleararray_pc(sd, "@inventorylist_uid$");
+	script_cleararray_pc(sd, "@inventorylist_equipswitch");
+
+	for (int i = 0; i < stor->max_amount; i++) {
+		if (inventory[i].nameid <= 0 || inventory[i].amount <= 0)
+			continue;
+		
+		setreg(INV_ID, "@inventorylist_id", inventory[i].nameid);
+		setreg(INV_IDX, "@inventorylist_idx", i);
+		setreg(INV_AMOUNT, "@inventorylist_amount", inventory[i].amount);
+		setreg(INV_EQUIP, "@inventorylist_equip", inventory[i].equip);
+		setreg(INV_REFINE, "@inventorylist_refine", inventory[i].refine);
+		setreg(INV_IDENTIFY, "@inventorylist_identify", inventory[i].identify);
+		setreg(INV_ATTRIBUTE, "@inventorylist_attribute", inventory[i].attribute);
+		for (k = 0; k < MAX_SLOTS; k++) {
+			sprintf(card_var, "@inventorylist_card%d", k + 1);
+			setreg(INV_CARD, card_var, inventory[i].card[k]);
+		}
+		setreg(INV_EXPIRE, "@inventorylist_expire", inventory[i].expire_time);
+		setreg(INV_BOUND, "@inventorylist_bound", inventory[i].bound);
+		setreg(INV_ENCHANTGRADE, "@inventorylist_enchantgrade", inventory[i].enchantgrade);
+		for (k = 0; k < MAX_ITEM_RDM_OPT; k++) {
+			sprintf(randopt_var, "@inventorylist_option_id%d", k + 1);
+			setreg(INV_OPTION, randopt_var, inventory[i].option[k].id);
+			sprintf(randopt_var, "@inventorylist_option_value%d", k + 1);
+			setreg(INV_OPTION, randopt_var, inventory[i].option[k].value);
+			sprintf(randopt_var, "@inventorylist_option_parameter%d", k + 1);
+			setreg(INV_OPTION, randopt_var, inventory[i].option[k].param);
+		}
+		setreg(INV_TRADABLE, "@inventorylist_tradable", pc_can_trade_item(sd, inventory[i]));
+		setreg(INV_FAVORITE, "@inventorylist_favorite", inventory[i].favorite);
+
+		char unique_id[64 + 1] = { 0 };
+		sprintf(unique_id, "%" PRIu64, inventory[i].unique_id);
+		setregstr(INV_UID, "@inventorylist_uid$", unique_id);
+
+		setreg(INV_EQUIPSWITCH, "@inventorylist_equipswitch", inventory[i].equipSwitch);
+		j++;
+	}
+	pc_setreg(sd, add_str("@inventorylist_count"), j);
+
+#undef setreg
+#undef setregstr
+	
+	return SCRIPT_CMD_SUCCESS;
+}
+#endif // Pandas_ScriptCommand_GetInventoryList
 
 /**
  * getskilllist ({<char_id>});
@@ -17315,18 +17582,19 @@ BUILDIN_FUNC(unequip) {
  **/
 BUILDIN_FUNC(equip) {
 	TBL_PC *sd;
-	struct item_data *item_data;
 
 	if (!script_charid2sd(3,sd))
 		return SCRIPT_CMD_FAILURE;
 
 	t_itemid nameid = script_getnum(st,2);
-	if ((item_data = itemdb_exists(nameid))) {
+	std::shared_ptr<item_data> id = item_db.find(nameid);
+
+	if (id != nullptr) {
 		int i;
 
 		ARR_FIND( 0, MAX_INVENTORY, i, sd->inventory.u.items_inventory[i].nameid == nameid );
 		if (i < MAX_INVENTORY) {
-			pc_equipitem(sd,i,item_data->equip);
+			pc_equipitem(sd,i,id->equip);
 			script_pushint(st,1);
 			return SCRIPT_CMD_SUCCESS;
 		}
@@ -17339,24 +17607,23 @@ BUILDIN_FUNC(equip) {
 
 BUILDIN_FUNC(autoequip)
 {
-	int flag;
-	struct item_data *item_data;
 	t_itemid nameid=script_getnum(st,2);
-	flag=script_getnum(st,3);
+	int flag=script_getnum(st,3);
+	std::shared_ptr<item_data> id = item_db.find(nameid);
 
-	if( ( item_data = itemdb_exists(nameid) ) == NULL )
+	if( id == nullptr )
 	{
 		ShowError("buildin_autoequip: Invalid item '%u'.\n", nameid);
 		return SCRIPT_CMD_FAILURE;
 	}
 
-	if( !itemdb_isequip2(item_data) )
+	if( !itemdb_isequip2(id.get()) )
 	{
 		ShowError("buildin_autoequip: Item '%u' cannot be equipped.\n", nameid);
 		return SCRIPT_CMD_FAILURE;
 	}
 
-	item_data->flag.autoequip = flag>0?1:0;
+	id->flag.autoequip = flag>0?1:0;
 	return SCRIPT_CMD_SUCCESS;
 }
 
@@ -17878,14 +18145,22 @@ BUILDIN_FUNC(sprintf)
 		if(data_isstring(data))  // String
 			StringBuf_Printf(&final_buf, buf2, script_getstr(st, arg+3));
 		else if(data_isint(data))  // Number
+#ifndef Pandas_Fix_Sprintf_ScriptCommand_Unsupport_Int64
 			StringBuf_Printf(&final_buf, buf2, script_getnum(st, arg+3));
+#else
+			StringBuf_Printf(&final_buf, buf2, script_getnum64(st, arg+3));
+#endif // Pandas_Fix_Sprintf_ScriptCommand_Unsupport_Int64
 		else if(data_isreference(data)) {  // Variable
 			char* name = reference_getname(data);
 
 			if(name[strlen(name)-1]=='$')  // var Str
 				StringBuf_Printf(&final_buf, buf2, script_getstr(st, arg+3));
 			else  // var Int
+#ifndef Pandas_Fix_Sprintf_ScriptCommand_Unsupport_Int64
 				StringBuf_Printf(&final_buf, buf2, script_getnum(st, arg+3));
+#else
+				StringBuf_Printf(&final_buf, buf2, script_getnum64(st, arg+3));
+#endif // Pandas_Fix_Sprintf_ScriptCommand_Unsupport_Int64
 		} else {  // Unsupported type
 			ShowError("buildin_sprintf: Unknown argument type!\n");
 			if(buf) aFree(buf);
@@ -18958,14 +19233,14 @@ BUILDIN_FUNC(setitemscript)
 {
 	int n = 0;
 	const char *script;
-	struct item_data *i_data;
 	struct script_code **dstscript;
 
 	t_itemid item_id = script_getnum(st,2);
 	script = script_getstr(st,3);
 	if( script_hasdata(st,4) )
 		n=script_getnum(st,4);
-	i_data = itemdb_exists(item_id);
+
+	std::shared_ptr<item_data> i_data = item_db.find(item_id);
 
 	if (!i_data || script==NULL || ( script[0] && script[0]!='{' )) {
 		script_pushint(st,0);
@@ -19019,7 +19294,7 @@ BUILDIN_FUNC(addmonsterdrop)
 	}
 
 	t_itemid item_id = script_getnum(st, 3);
-	item_data *itm = itemdb_exists(item_id);
+	std::shared_ptr<item_data> itm = item_db.find(item_id);
 
 	if (itm == nullptr) {
 		ShowError("addmonsterdrop: Nonexistant item %u requested.\n", item_id);
@@ -19269,7 +19544,7 @@ BUILDIN_FUNC(searchitem)
 {
 	struct script_data* data = script_getdata(st, 2);
 	const char *itemname = script_getstr(st,3);
-	struct item_data *items[MAX_SEARCH];
+	std::map<t_itemid, std::shared_ptr<item_data>> items;
 	int count;
 
 	char* name;
@@ -19278,10 +19553,10 @@ BUILDIN_FUNC(searchitem)
 	int32 i;
 	TBL_PC* sd = NULL;
 
-	if ((items[0] = itemdb_exists(atoi(itemname))))
+	if ((items[0] = item_db.find(strtoul(itemname, nullptr, 10))))
 		count = 1;
 	else
-		count = itemdb_searchname_array(items, ARRAYLENGTH(items), itemname);
+		count = itemdb_searchname_array(items, MAX_SEARCH, itemname);
 
 	if (!count) {
 		script_pushint(st, 0);
@@ -20598,6 +20873,13 @@ BUILDIN_FUNC(unitwalk)
 
 	ud = unit_bl2ud(bl);
 
+	// Unit was already forced to walk.
+	if (ud != nullptr && ud->state.force_walk) {
+		script_pushint(st, 0);
+		ShowWarning("buildin_%s: Unit has already been forced to walk and not reached it's destination yet.\n", cmd);
+		return SCRIPT_CMD_FAILURE;
+	}
+
 	if (bl->type == BL_NPC) {
 		if (!((TBL_NPC*)bl)->status.hp)
 			status_calc_npc(((TBL_NPC*)bl), SCO_FIRST);
@@ -20609,8 +20891,11 @@ BUILDIN_FUNC(unitwalk)
 		int x = script_getnum(st,3);
 		int y = script_getnum(st,4);
 
-		if (script_pushint(st, unit_can_reach_pos(bl,x,y,0)))
+		if (script_pushint(st, unit_can_reach_pos(bl,x,y,0))) {
+			if (ud != nullptr)
+				ud->state.force_walk = true;
 			add_timer(gettick()+50, unit_delay_walktoxy_timer, bl->id, (x<<16)|(y&0xFFFF)); // Need timer to avoid mismatches
+		}
 	} else {
 		struct block_list* tbl = map_id2bl(script_getnum(st,3));
 
@@ -20618,8 +20903,11 @@ BUILDIN_FUNC(unitwalk)
 			ShowError("buildin_unitwalk: Bad target destination.\n");
 			script_pushint(st, 0);
 			return SCRIPT_CMD_FAILURE;
-		} else if (script_pushint(st, unit_can_reach_bl(bl, tbl, distance_bl(bl, tbl)+1, 0, NULL, NULL)))
+		} else if (script_pushint(st, unit_can_reach_bl(bl, tbl, distance_bl(bl, tbl)+1, 0, NULL, NULL))) {
+			if (ud != nullptr)
+				ud->state.force_walk = true;
 			add_timer(gettick()+50, unit_delay_walktobl_timer, bl->id, tbl->id); // Need timer to avoid mismatches
+		}
 		off = 4;
 	}
 
@@ -20765,10 +21053,21 @@ BUILDIN_FUNC(unitstopwalk)
 	if (script_hasdata(st, 3))
 		flag = script_getnum(st, 3);
 
-	if(script_rid2bl(2,bl))
-		unit_stop_walking(bl, flag);
+	if(script_rid2bl(2,bl)) {
+		unit_data *ud = unit_bl2ud(bl);
 
-	return SCRIPT_CMD_SUCCESS;
+		if (ud != nullptr)
+			ud->state.force_walk = false;
+
+		if (unit_stop_walking(bl, flag) == 0 && flag != USW_FORCE_STOP) {
+			ShowWarning("buildin_unitstopwalk: Unable to find unit or unit is not walking.\n");
+			return SCRIPT_CMD_FAILURE;
+		}
+
+		return SCRIPT_CMD_SUCCESS;
+	} else {
+		return SCRIPT_CMD_FAILURE;
+	}
 }
 
 /**
@@ -26569,15 +26868,15 @@ BUILDIN_FUNC(mail){
 		}
 
 		for( i = 0; i < num_items && start < end; i++, start++ ){
-			struct item_data *item = itemdb_exists(msg.item[i].nameid);
+			std::shared_ptr<item_data> itm = item_db.find(msg.item[i].nameid);
 
 			msg.item[i].amount = (short)get_val2_num( st, reference_uid( id, start ), reference_getref( data ) );
 
 			if( msg.item[i].amount <= 0 ){
 				ShowError( "buildin_mail: amount %d for item %u is invalid.\n", msg.item[i].amount, msg.item[i].nameid );
 				return SCRIPT_CMD_FAILURE;
-			}else if( itemdb_isstackable2(item) ){
-				uint16 max = item->stack.amount > 0 ? item->stack.amount : MAX_AMOUNT;
+			}else if( itemdb_isstackable2(itm.get()) ){
+				uint16 max = itm->stack.amount > 0 ? itm->stack.amount : MAX_AMOUNT;
 
 				if( msg.item[i].amount > max ){
 					ShowWarning( "buildin_mail: amount %d for item %u is exceeding the maximum of %d. Capping...\n", msg.item[i].amount, msg.item[i].nameid, max );
@@ -26603,11 +26902,11 @@ BUILDIN_FUNC(mail){
 		}
 
 		for (i = 0; i < num_items && start < end; i++, start++) {
-			struct item_data* item = itemdb_exists(msg.item[i].nameid);
+			std::shared_ptr<item_data> itm = item_db.find(msg.item[i].nameid);
 
 			msg.item[i].refine = (char)get_val2_num( st, reference_uid( id, start ), reference_getref( data ) );
 
-			if (!item->flag.no_refine && (item->type == IT_WEAPON || item->type == IT_ARMOR || item->type == IT_SHADOWGEAR)) {
+			if (!itm->flag.no_refine && (itm->type == IT_WEAPON || itm->type == IT_ARMOR || itm->type == IT_SHADOWGEAR)) {
 				if (msg.item[i].refine > MAX_REFINE)
 					msg.item[i].refine = MAX_REFINE;
 			}
@@ -26629,8 +26928,6 @@ BUILDIN_FUNC(mail){
 		}
 
 		for( i = 0; i < num_items && start < end; i++, start++ ){
-			struct item_data *item = itemdb_exists(msg.item[i].nameid);
-
 			msg.item[i].bound = (char)get_val2_num( st, reference_uid( id, start ), reference_getref( data ) );
 
 			if( msg.item[i].bound < BOUND_NONE || msg.item[i].bound >= BOUND_MAX ){
@@ -27133,7 +27430,7 @@ BUILDIN_FUNC( openstylist ){
 		return SCRIPT_CMD_FAILURE;
 	}
 
-	clif_ui_open( sd, OUT_UI_STYLIST, 0 );
+	clif_ui_open( *sd, OUT_UI_STYLIST, 0 );
 
 	return SCRIPT_CMD_SUCCESS;
 #else
@@ -27254,6 +27551,10 @@ BUILDIN_FUNC(randomoptgroup)
 }
 
 BUILDIN_FUNC( open_quest_ui ){
+#if PACKETVER < 20151202
+	ShowError( "buildin_open_quest_ui: This command requires PACKETVER 20151202 or newer.\n" );
+	return SCRIPT_CMD_FAILURE;
+#else
 	struct map_session_data* sd;
 
 	if (!script_charid2sd(3, sd))
@@ -27268,14 +27569,15 @@ BUILDIN_FUNC( open_quest_ui ){
 			ShowWarning("buildin_open_quest_ui: Character %d doesn't have quest %d.\n", sd->status.char_id, quest_id);
 	}
 
-	clif_ui_open( sd, OUT_UI_QUEST, quest_id );
+	clif_ui_open( *sd, OUT_UI_QUEST, quest_id );
 
 	return SCRIPT_CMD_SUCCESS;
+#endif
 }
 
 BUILDIN_FUNC(openbank){
-#if PACKETVER < 20150128
-	ShowError( "buildin_openbank: This command requires PACKETVER 20150128 or newer.\n" );
+#if PACKETVER < 20151202
+	ShowError( "buildin_openbank: This command requires PACKETVER 20151202 or newer.\n" );
 	return SCRIPT_CMD_FAILURE;
 #else
 	struct map_session_data* sd = nullptr;
@@ -27304,7 +27606,7 @@ BUILDIN_FUNC(openbank){
 	}
 #endif // Pandas_MapFlag_NoBank
 
-	clif_ui_open( sd, OUT_UI_BANK, 0 );
+	clif_ui_open( *sd, OUT_UI_BANK, 0 );
 #ifdef Pandas_ScriptCommand_OpenBank
 	script_pushint(st, 1);
 #endif // Pandas_ScriptCommand_OpenBank
@@ -27404,6 +27706,23 @@ BUILDIN_FUNC(getjobexp_ratio){
 
 	script_pushint64( st, static_cast<t_exp>( result ) );
 	return SCRIPT_CMD_SUCCESS;
+}
+
+BUILDIN_FUNC( enchantgradeui ){
+#if PACKETVER_MAIN_NUM >= 20200916 || PACKETVER_RE_NUM >= 20200724
+	struct map_session_data* sd;
+
+	if( !script_charid2sd( 2, sd ) ){
+		return SCRIPT_CMD_FAILURE;
+	}
+
+	clif_ui_open( *sd, OUT_UI_ENCHANTGRADE, 0 );
+
+	return SCRIPT_CMD_SUCCESS;
+#else
+	ShowError( "buildin_enchantgradeui: This command requires PACKETVER 2020-07-24 or newer.\n" );
+	return SCRIPT_CMD_FAILURE;
+#endif
 }
 
 #include "../custom/script.inc"
@@ -27837,7 +28156,6 @@ BUILDIN_FUNC(viewequip) {
  * -----------------------------------------------------------*/
 BUILDIN_FUNC(countitemidx) {
 	struct map_session_data *sd = nullptr;
-	struct item_data *id = nullptr;
 	int idx = -1;
 
 	if (!script_charid2sd(3, sd)) {
@@ -27852,7 +28170,7 @@ BUILDIN_FUNC(countitemidx) {
 		return SCRIPT_CMD_SUCCESS;
 	}
 
-	if (!(id = itemdb_exists(sd->inventory.u.items_inventory[idx].nameid))) {
+	if (!item_db.find(sd->inventory.u.items_inventory[idx].nameid)) {
 		ShowWarning("buildin_countitemidx: Invalid Item ID (%u).\n", sd->inventory.u.items_inventory[idx].nameid);
 		script_pushint(st, 0);
 		return SCRIPT_CMD_SUCCESS;
@@ -27873,7 +28191,6 @@ BUILDIN_FUNC(countitemidx) {
  * -----------------------------------------------------------*/
 BUILDIN_FUNC(identifyidx) {
 	struct map_session_data *sd = nullptr;
-	struct item_data *id = nullptr;
 	int idx = -1;
 
 	if (!script_charid2sd(3, sd)) {
@@ -27888,7 +28205,7 @@ BUILDIN_FUNC(identifyidx) {
 		return SCRIPT_CMD_SUCCESS;
 	}
 
-	if (!(id = itemdb_exists(sd->inventory.u.items_inventory[idx].nameid))) {
+	if (!item_db.find(sd->inventory.u.items_inventory[idx].nameid)) {
 		ShowWarning("buildin_identifyidx: Invalid Item ID (%u).\n", sd->inventory.u.items_inventory[idx].nameid);
 		script_pushint(st, 0);
 		return SCRIPT_CMD_SUCCESS;
@@ -27914,7 +28231,6 @@ BUILDIN_FUNC(identifyidx) {
  * -----------------------------------------------------------*/
 BUILDIN_FUNC(unequipidx) {
 	struct map_session_data *sd = nullptr;
-	struct item_data *id = nullptr;
 	int idx = -1;
 
 	if (!script_charid2sd(3, sd)) {
@@ -27929,13 +28245,14 @@ BUILDIN_FUNC(unequipidx) {
 		return SCRIPT_CMD_SUCCESS;
 	}
 
-	if (!(id = itemdb_exists(sd->inventory.u.items_inventory[idx].nameid))) {
+	std::shared_ptr<item_data> id = item_db.find(sd->inventory.u.items_inventory[idx].nameid);
+	if (id == nullptr) {
 		ShowWarning("buildin_unequipidx: Invalid Item ID (%u).\n", sd->inventory.u.items_inventory[idx].nameid);
 		script_pushint(st, 0);
 		return SCRIPT_CMD_SUCCESS;
 	}
 
-	if (!itemdb_isequip2(id)) {
+	if (!itemdb_isequip2(id.get())) {
 		script_pushint(st, 0);
 		return SCRIPT_CMD_SUCCESS;
 	}
@@ -27960,7 +28277,6 @@ BUILDIN_FUNC(unequipidx) {
  * -----------------------------------------------------------*/
 BUILDIN_FUNC(equipidx) {
 	struct map_session_data *sd = nullptr;
-	struct item_data *id = nullptr;
 	int idx = -1;
 
 	if (!script_charid2sd(3, sd)) {
@@ -27974,14 +28290,15 @@ BUILDIN_FUNC(equipidx) {
 		script_pushint(st, 0);
 		return SCRIPT_CMD_SUCCESS;
 	}
-
-	if (!(id = itemdb_exists(sd->inventory.u.items_inventory[idx].nameid))) {
+	
+	std::shared_ptr<item_data> id = item_db.find(sd->inventory.u.items_inventory[idx].nameid);
+	if (id == nullptr) {
 		ShowWarning("buildin_equipidx: Invalid Item ID (%u).\n", sd->inventory.u.items_inventory[idx].nameid);
 		script_pushint(st, 0);
 		return SCRIPT_CMD_SUCCESS;
 	}
 
-	if (!itemdb_isequip2(id)) {
+	if (!itemdb_isequip2(id.get())) {
 		script_pushint(st, 0);
 		return SCRIPT_CMD_SUCCESS;
 	}
@@ -28174,68 +28491,89 @@ BUILDIN_FUNC(getequipexpiretick) {
 /* ===========================================================
  * 指令: getinventoryinfo
  * 描述: 查询指定背包序号的道具的详细信息
- * 用法: getinventoryinfo <背包序号>,<要查看的信息类型>{,<角色编号>};
- * 返回: 查询失败返回 -1, 若查询成功除了类型为 11 的返回值是个字符串, 其他的皆为数值
+ * 用法: getinventoryinfo <道具的背包序号>,<要查看的信息类型>{,<角色编号>};
+ * 用法: getcartinfo <道具的手推车序号>,<要查看的信息类型>{,<角色编号>};
+ * 用法: getguildstorageinfo <道具的公会仓库序号>,<要查看的信息类型>{,<角色编号>};
+ * 用法: getstorageinfo <道具的个人仓库/扩充仓库序号>,<要查看的信息类型>{{,<仓库编号>},<角色编号>};
+ * 返回: 查询失败返回 -1, 若查询成功则返回你所查询的信息
  * 作者: Sola丶小克
  * -----------------------------------------------------------*/
 BUILDIN_FUNC(getinventoryinfo) {
     struct map_session_data *sd = nullptr;
 	struct item_data *id = nullptr;
 	int idx = script_getnum(st, 2);
-	int64 retval = 0;
+	const char* command = script_getfuncname(st);
+	int charid_slot = (!stricmp(command, "getstorageinfo") ? 5 : 4);
+
+	if (!script_charid2sd(charid_slot, sd)) {
+		script_pushint(st, -1);
+		return SCRIPT_CMD_SUCCESS;
+	}
+
+	struct s_storage* stor = nullptr;
+	struct item* inventory = nullptr;
+	int stor_id = (script_hasdata(st, 4) ? script_getnum(st, 4) : 0);
+
+	if (!script_getstorage(st, sd, &stor, &inventory, stor_id)) {
+		return SCRIPT_CMD_FAILURE;
+	}
+	
+	if (st->state == RERUNLINE) {
+		return SCRIPT_CMD_SUCCESS;
+	}
+
+	if (!stor || !inventory) {
+		ShowError("buildin_%s: cannot read inventory or storage data.\n", command);
+		script_pushint(st, -1);
+		return SCRIPT_CMD_FAILURE;
+	}
+
+	if (idx < 0 || idx >= stor->max_amount) {
+		script_pushint(st, -1);
+		return SCRIPT_CMD_SUCCESS;
+	}
+
+	if (!itemdb_exists(inventory[idx].nameid)) {
+		script_pushint(st, -1);
+		return SCRIPT_CMD_SUCCESS;
+	}
+
+	if (inventory[idx].amount <= 0) {
+		script_pushint(st, -1);
+		return SCRIPT_CMD_SUCCESS;
+	}
+
 	int type = script_getnum(st, 3);
-
-	if (!script_charid2sd(4, sd)) {
-		script_pushint(st, -1);
-		return SCRIPT_CMD_SUCCESS;
-	}
-
-	if (idx < 0 || idx >= sd->inventory.max_amount) {
-		script_pushint(st, -1);
-		return SCRIPT_CMD_SUCCESS;
-	}
-
-	if (!itemdb_exists(sd->inventory.u.items_inventory[idx].nameid)) {
-		script_pushint(st, -1);
-		return SCRIPT_CMD_SUCCESS;
-	}
-
-	if (sd->inventory.u.items_inventory[idx].amount <= 0) {
-		script_pushint(st, -1);
-		return SCRIPT_CMD_SUCCESS;
-	}
-
 	switch (type)
 	{
-	case 0: retval = sd->inventory.u.items_inventory[idx].nameid; break;
-	case 1: retval = sd->inventory.u.items_inventory[idx].amount; break;
-	case 2: retval = sd->inventory.u.items_inventory[idx].equip; break;
-	case 3: retval = sd->inventory.u.items_inventory[idx].refine; break;
-	case 4: retval = sd->inventory.u.items_inventory[idx].identify; break;
-	case 5: retval = sd->inventory.u.items_inventory[idx].attribute; break;
-	case 6: retval = sd->inventory.u.items_inventory[idx].card[0]; break;
-	case 7: retval = sd->inventory.u.items_inventory[idx].card[1]; break;
-	case 8: retval = sd->inventory.u.items_inventory[idx].card[2]; break;
-	case 9: retval = sd->inventory.u.items_inventory[idx].card[3]; break;
-	case 10: retval = sd->inventory.u.items_inventory[idx].expire_time; break;
-	case 11: retval = sd->inventory.u.items_inventory[idx].unique_id; break;
+	case 0:  script_pushint(st, inventory[idx].nameid); break;
+	case 1:  script_pushint(st, inventory[idx].amount); break;
+	case 2:  script_pushint(st, inventory[idx].equip); break;
+	case 3:  script_pushint(st, inventory[idx].refine); break;
+	case 4:  script_pushint(st, inventory[idx].identify); break;
+	case 5:  script_pushint(st, inventory[idx].attribute); break;
+	case 6:  script_pushint(st, inventory[idx].card[0]); break;
+	case 7:  script_pushint(st, inventory[idx].card[1]); break;
+	case 8:  script_pushint(st, inventory[idx].card[2]); break;
+	case 9:  script_pushint(st, inventory[idx].card[3]); break;
+	case 10: script_pushint(st, inventory[idx].expire_time); break;
+	case 11: script_pushint(st, inventory[idx].unique_id); break;
 	case 12: case 13: case 14: case 15: case 16:
-		retval = sd->inventory.u.items_inventory[idx].option[type - 12].id; break;
+		script_pushint(st, inventory[idx].option[type - 12].id); break;
 	case 17: case 18: case 19: case 20: case 21:
-		retval = sd->inventory.u.items_inventory[idx].option[type - 17].value; break;
+		script_pushint(st, inventory[idx].option[type - 17].value); break;
 	case 22: case 23: case 24: case 25: case 26:
-		retval = sd->inventory.u.items_inventory[idx].option[type - 22].param; break;
-	case 27:
-		retval = (int)sd->inventory.u.items_inventory[idx].bound; break;
-	case 28:
-		retval = (int)sd->inventory.u.items_inventory[idx].enchantgrade; break;
+		script_pushint(st, inventory[idx].option[type - 22].param); break;
+	case 27: script_pushint(st, inventory[idx].bound); break;
+	case 28: script_pushint(st, inventory[idx].enchantgrade); break;
+	case 29: script_pushint(st, inventory[idx].equipSwitch); break;
+	case 30: script_pushint(st, inventory[idx].favorite); break;
 	default:
-		ShowWarning("buildin_getinventoryinfo: The type should be in range 0-%d, currently type is: %d.\n", 28, type);
+		ShowWarning("buildin_%s: The type should be in range 0-%d, currently type is: %d.\n", command, 30, type);
 		script_pushint(st, -1);
-		return SCRIPT_CMD_SUCCESS;
+		return SCRIPT_CMD_FAILURE;
 	}
 
-	script_pushint(st, retval);
 	return SCRIPT_CMD_SUCCESS;
 }
 #endif // Pandas_ScriptCommand_GetInventoryInfo
@@ -28416,9 +28754,6 @@ BUILDIN_FUNC(script4each) {
 	const char *execute_script = script_getstr(st, 2);
 	int execute_range = script_getnum(st, 3);
 
-	char *cmdname = nullptr;
-	cmdname = script_getfuncname(st);
-
 	struct script_code* script = nullptr;
 	int pos = 0;
 	bool script_needfree = false;
@@ -28432,7 +28767,7 @@ BUILDIN_FUNC(script4each) {
 		pos = ev->pos;
 	}
 	else {
-		script = parse_script(execute_script, cmdname, 0, SCRIPT_IGNORE_EXTERNAL_BRACKETS);
+		script = parse_script(execute_script, script_getfuncname(st), 0, SCRIPT_IGNORE_EXTERNAL_BRACKETS);
 		script_needfree = (script != nullptr);
 	}
 #endif // !defined(Pandas_Helper_Common_Function) || !defined(Pandas_Redeclaration_Struct_Event_Data)
@@ -28442,15 +28777,16 @@ BUILDIN_FUNC(script4each) {
 	enum bl_type bltype = BL_PC;
 
 	// 根据使用的指令名称, 确定后续对什么类型的单位进行遍历
-	if (stricmp(cmdname, "script4each") == 0) {
+	const char* command = script_getfuncname(st);
+	if (stricmp(command, "script4each") == 0) {
 		bltype = BL_PC;
 		iter = mapit_geteachpc();
 	}
-	else if (stricmp(cmdname, "script4eachmob") == 0) {
+	else if (stricmp(command, "script4eachmob") == 0) {
 		bltype = BL_MOB;
 		iter = mapit_geteachmob();
 	}
-	else if (stricmp(cmdname, "script4eachnpc") == 0) {
+	else if (stricmp(command, "script4eachnpc") == 0) {
 		bltype = BL_NPC;
 		iter = mapit_geteachnpc();
 	}
@@ -28598,7 +28934,7 @@ BUILDIN_FUNC(script4each) {
 		break;
 	}
 	default:
-		ShowWarning("buildin_%s: Invalid execute range '%d'.\n", cmdname, execute_range);
+		ShowWarning("buildin_%s: Invalid execute range '%d'.\n", script_getfuncname(st), execute_range);
 		break;
 	}
 
@@ -29332,16 +29668,13 @@ BUILDIN_FUNC(gettimefmt) {
  * -----------------------------------------------------------*/
 BUILDIN_FUNC(multicatchpet) {
 	TBL_PC* sd;
-	char* functionname = nullptr;
 	unsigned int i = 2;
 
 	if (!script_rid2sd(sd))
 		return SCRIPT_CMD_SUCCESS;
 
-	functionname = script_getfuncname(st);
-
 	if (!script_hasdata(st, i)) {
-		ShowError("buildin_%s: no arguments given!\n", functionname);
+		ShowError("buildin_%s: no arguments given!\n", script_getfuncname(st));
 		st->state = END;
 		return SCRIPT_CMD_FAILURE;
 	}
@@ -29355,7 +29688,7 @@ BUILDIN_FUNC(multicatchpet) {
 			sd->pandas.multi_catch_target_class.push_back(script_getnum(st, i));
 		}
 		else {
-			ShowError("buildin_%s: The No.%d parameter is not integer type.\n", functionname, i - 1);
+			ShowError("buildin_%s: The No.%d parameter is not integer type.\n", script_getfuncname(st), i - 1);
 			script_reportdata(data);
 			st->state = END;
 			return SCRIPT_CMD_FAILURE;
@@ -29638,7 +29971,6 @@ BUILDIN_FUNC(storagegetitem) {
 	struct item it = { 0 };
 	TBL_PC* sd = nullptr;
 	unsigned char flag = 0;
-	const char* command = script_getfuncname(st);
 	std::shared_ptr<item_data> id;
 
 	if (script_isstring(st, 2)) {// "<item name>"
@@ -29676,7 +30008,7 @@ BUILDIN_FUNC(storagegetitem) {
 	it.identify = 1;
 	it.bound = BOUND_NONE;
 
-	if (!strcmp(command, "storagegetitembound")) {
+	if (!strcmp(script_getfuncname(st), "storagegetitembound")) {
 		char bound = script_getnum(st, 4);
 		if (bound < BOUND_NONE || bound >= BOUND_MAX) {
 			ShowError("script_storagegetitembound: Not a correct bound type! Type=%d\n", bound);
@@ -29739,7 +30071,7 @@ BUILDIN_FUNC(storagegetitem) {
 /* ===========================================================
  * 指令: setinventoryinfo
  * 描述: 设置指定背包序号道具的部分详细信息, 与 getinventoryinfo 对应
- * 用法: setinventoryinfo <背包序号>,<要设置的信息类型>,<值>{{,<标记位>},<角色编号>};
+ * 用法: setinventoryinfo <道具的背包序号>,<要设置的信息类型>,<值>{{,<标记位>},<角色编号>};
  * 返回: 设置成功则返回 1, 设置失败或角色不存在则返回 0, 返回负数也是失败 (值表示不同失败原因)
  * 作者: Sola丶小克
  * -----------------------------------------------------------*/
@@ -29797,7 +30129,7 @@ BUILDIN_FUNC(setinventoryinfo) {
 			break;
 		}
 
-		struct item_data* card_itemdata = itemdb_exists((t_itemid)value);
+		std::shared_ptr<item_data> card_itemdata = item_db.find((t_itemid)value);
 		if (!card_itemdata) {
 			ShowWarning("buildin_setinventoryinfo: Nonexistant item : %u.\n", value);
 			script_pushint(st, 0);
@@ -29874,8 +30206,15 @@ BUILDIN_FUNC(setinventoryinfo) {
 		sd->inventory.u.items_inventory[idx].enchantgrade = (uint8)value;
 		need_recalc_status = true;
 		break;
+	case 29:
+		sd->inventory.u.items_inventory[idx].equipSwitch = (unsigned int)value;
+		break;
+	case 30:
+		value = cap_value(value, 0, 1);
+		sd->inventory.u.items_inventory[idx].favorite = (char)value;
+		break;
 	default:
-		ShowWarning("buildin_setinventoryinfo: The type should be in range 3-%d, currently type is: %d.\n", 28, type);
+		ShowWarning("buildin_setinventoryinfo: The type should be in range 3-%d, currently type is: %d.\n", 30, type);
 		script_pushint(st, 0);
 		return SCRIPT_CMD_SUCCESS;
 	}
@@ -30825,6 +31164,9 @@ BUILDIN_FUNC(getmapspawns) {
 	for (int i = 0; i < MAX_MOB_LIST_PER_MAP; i++) {
 		if (!mapdata || mapdata->moblist[i] == nullptr) continue;
 		struct spawn_data* data = mapdata->moblist[i];
+		if (!data) continue;
+		std::shared_ptr<s_mob_db> mob = mob_db.find(data->id);
+		if (!mob) continue;
 
 		script_both_setreg(st, "spawn_mobid", data->id, true, j, char_id);
 		script_both_setregstr(st, "spawn_name$", data->name, true, j, char_id);
@@ -30833,7 +31175,7 @@ BUILDIN_FUNC(getmapspawns) {
 		script_both_setreg(st, "spawn_size", data->state.size, true, j, char_id);
 		script_both_setreg(st, "spawn_isboss", data->state.boss, true, j, char_id);
 		script_both_setreg(st, "spawn_ai", data->state.ai, true, j, char_id);
-		script_both_setreg(st, "spawn_level", data->level, true, j, char_id);
+		script_both_setreg(st, "spawn_level", (data->level > 0 ? data->level : mob->lv), true, j, char_id);
 		script_both_setreg(st, "spawn_delay1", data->delay1, true, j, char_id);
 		script_both_setreg(st, "spawn_delay2", data->delay2, true, j, char_id);
 		script_both_setregstr(st, "spawn_eventname$", data->eventname, true, j, char_id);
@@ -30910,8 +31252,11 @@ BUILDIN_FUNC(getmobspawns) {
 		for (int i = 0; i < MAX_MOB_LIST_PER_MAP; i++) {
 			if (!mapdata || mapdata->moblist[i] == nullptr) continue;
 			struct spawn_data* data = mapdata->moblist[i];
+			if (!data) continue;
 			if (data->id != mob_id) continue;
-
+			std::shared_ptr<s_mob_db> mob = mob_db.find(data->id);
+			if (!mob) continue;
+			
 			script_both_setreg(st, "spawn_mobid", data->id, true, j, char_id);
 			script_both_setregstr(st, "spawn_name$", data->name, true, j, char_id);
 			script_both_setreg(st, "spawn_num", data->num, true, j, char_id);
@@ -30919,7 +31264,7 @@ BUILDIN_FUNC(getmobspawns) {
 			script_both_setreg(st, "spawn_size", data->state.size, true, j, char_id);
 			script_both_setreg(st, "spawn_isboss", data->state.boss, true, j, char_id);
 			script_both_setreg(st, "spawn_ai", data->state.ai, true, j, char_id);
-			script_both_setreg(st, "spawn_level", data->level, true, j, char_id);
+			script_both_setreg(st, "spawn_level", (data->level > 0 ? data->level : mob->lv), true, j, char_id);
 			script_both_setreg(st, "spawn_delay1", data->delay1, true, j, char_id);
 			script_both_setreg(st, "spawn_delay2", data->delay2, true, j, char_id);
 			script_both_setregstr(st, "spawn_eventname$", data->eventname, true, j, char_id);
@@ -31432,6 +31777,281 @@ BUILDIN_FUNC(getrateidx) {
 }
 #endif // Pandas_ScriptCommand_GetRateIdx
 
+#ifdef Pandas_ScriptCommand_GetBossInfo
+/* ===========================================================
+ * 指令: getbossinfo
+ * 描述: 查询 BOSS 魔物重生时间及其坟墓等信息
+ * 用法: getbossinfo {<"地图名称">{,<魔物编号>{,<角色编号>}}};
+ * 返回: 返回查询到的记录数
+ * 作者: Sola丶小克
+ * -----------------------------------------------------------*/
+BUILDIN_FUNC(getbossinfo) {
+	const char* mapname = nullptr;
+	struct map_session_data* sd = nullptr;
+	int mobid = 0, char_id = 0, mapid = -1;
+
+	if (script_hasdata(st, 2)) {
+		mapname = script_getstr(st, 2);
+
+		if (strcmpi(mapname, "all") == 0) {
+			// 查询全部地图
+			mapid = -1;
+		}
+		else if (strcmpi(mapname, "this") == 0) {
+			// 查询脚本所关联玩家的当前地图
+			if (!script_charid2sd(4, sd)) {
+				// todo: warning
+				script_pushint(st, 0);
+				return SCRIPT_CMD_FAILURE;
+			}
+			mapid = sd->bl.m;
+		}
+		else {
+			// 按指定的地图名称进行查询
+			mapid = map_mapname2mapid(mapname);
+
+			if (mapid < 0) {
+				ShowError("buildin_getbossinfo: Unknown map name %s.\n", mapname);
+				script_pushint(st, 0);
+				return SCRIPT_CMD_FAILURE;
+			}
+		}
+	}
+
+	if (script_hasdata(st, 3)) {
+		mobid = script_getnum(st, 3);
+	}
+
+	if (script_hasdata(st, 4)) {
+		char_id = script_getnum(st, 4);
+	}
+
+	script_both_setreg(st, "boss_count", 0, false, -1, char_id);
+	
+	DBIterator* iter = nullptr;
+	struct mob_data* md = nullptr;
+	int count = 0;
+
+	iter = db_iterator(get_bossid_db());
+	for (md = (struct mob_data*)dbi_first(iter); dbi_exists(iter); md = (struct mob_data*)dbi_next(iter)) {
+		if (mapid != -1 && mapid != md->bl.m)
+			continue;
+		if (mobid != 0 && mobid != md->mob_id)
+			continue;
+		
+		struct npc_data* tomb_nd = nullptr;
+		if (md->tomb_nid) {
+			tomb_nd = map_id2nd(md->tomb_nid);
+		}
+
+		script_both_setreg(st, "boss_mapid", md->bl.m, true, count, char_id);
+		script_both_setregstr(st, "boss_mapname$", (md->bl.m >= 0 ? map[md->bl.m].name : ""), true, count, char_id);
+		script_both_setreg(st, "boss_x", md->bl.x, true, count, char_id);
+		script_both_setreg(st, "boss_y", md->bl.y, true, count, char_id);
+		
+		script_both_setreg(st, "boss_gid", md->bl.id, true, count, char_id);
+		script_both_setreg(st, "boss_spawn", (md->spawn_timer != INVALID_TIMER ? DIFF_TICK(get_timer(md->spawn_timer)->tick, gettick()) : 0), true, count, char_id);
+		script_both_setreg(st, "boss_classid", md->mob_id, true, count, char_id);
+
+		script_both_setreg(st, "boss_tomb_mapid", (tomb_nd ? tomb_nd->bl.m : -1), true, count, char_id);
+		script_both_setregstr(st, "boss_tomb_mapname$", (tomb_nd && tomb_nd->bl.m >= 0 ? map[tomb_nd->bl.m].name : ""), true, count, char_id);
+		script_both_setreg(st, "boss_tomb_x", (tomb_nd ? tomb_nd->bl.x : 0), true, count, char_id);
+		script_both_setreg(st, "boss_tomb_y", (tomb_nd ? tomb_nd->bl.y : 0), true, count, char_id);
+
+		script_both_setreg(st, "boss_tomb_gid", (tomb_nd ? tomb_nd->bl.id : 0), true, count, char_id);
+		script_both_setreg(st, "boss_tomb_createtime", (tomb_nd ? tomb_nd->u.tomb.kill_time : 0), true, count, char_id);
+
+		script_both_setreg(st, "boss_tomb_respawnsecs", -1, true, count, char_id);
+		t_tick respawntime = -1;
+		if (tomb_nd && tomb_nd->u.tomb.md->spawn) {
+			respawntime = gett_tickimer(tomb_nd->u.tomb.md->spawn_timer);
+			if (respawntime != -1) {
+				respawntime = DIFF_TICK(respawntime, gettick());
+				respawntime = respawntime / 1000;
+				script_both_setreg(st, "boss_tomb_respawnsecs", respawntime, true, count, char_id);
+				respawntime = respawntime + (int)time(NULL);
+			}
+		}
+		script_both_setreg(st, "boss_tomb_respawntime", respawntime, true, count, char_id);
+
+		script_both_setregstr(st, "boss_tomb_killer_name$", (tomb_nd ? tomb_nd->u.tomb.killer_name : ""), true, count, char_id);
+#ifdef Pandas_FuncParams_Mob_MvpTomb_Create
+		script_both_setreg(st, "boss_tomb_killer_gid", (tomb_nd ? tomb_nd->u.tomb.killer_gid : 0), true, count, char_id);
+#endif // Pandas_FuncParams_Mob_MvpTomb_Create
+		
+		count++;
+	}
+	dbi_destroy(iter);
+
+	script_both_setreg(st, "boss_count", count, false, -1, char_id);
+	script_pushint(st, count);
+	return SCRIPT_CMD_SUCCESS;
+}
+#endif // Pandas_ScriptCommand_GetBossInfo
+
+#ifdef Pandas_ScriptCommand_WhoDropItem
+/* ===========================================================
+ * 指令: whodropitem
+ * 描述: 查询指定道具会从哪些魔物身上掉落以及掉落的机率信息
+ * 用法: whodropitem <物品编号/"物品名称">{,<返回的最大记录数>{,<角色编号>}};
+ * 返回: 返回查询到的记录数量
+ * 作者: Sola丶小克 (感谢 "人鱼姬的思念")
+ * -----------------------------------------------------------*/
+BUILDIN_FUNC(whodropitem) {
+	t_itemid nameid = 0;
+	int max_result = (script_hasdata(st, 3) && script_isint(st, 3)) ? script_getnum(st, 3) : 0;
+	int char_id = (script_hasdata(st, 4) && script_isint(st, 4)) ? script_getnum(st, 4) : 0;
+	std::shared_ptr<item_data> id;
+	struct map_session_data *sd = nullptr;
+
+	// 清空比较关键的返回值
+	script_both_setreg(st, "whodropitem_count", 0, false, 0, char_id);
+
+	if (script_isstring(st, 2)) {// "<item name>"
+		const char* name = script_getstr(st, 2);
+
+		id = item_db.searchname(name);
+
+		if (id == nullptr) {
+			ShowError("buildin_whodropitem: Nonexistant item %s requested.\n", name);
+			script_pushint(st, 0);
+			return SCRIPT_CMD_FAILURE;
+		}
+		nameid = id->nameid;
+	}
+	else {// <item id>
+		nameid = script_getnum(st, 2);
+
+		id = item_db.find(nameid);
+
+		if (id == nullptr) {
+			ShowError("buildin_whodropitem: Nonexistant item %u requested.\n", nameid);
+			script_pushint(st, 0);
+			return SCRIPT_CMD_FAILURE;
+		}
+	}
+	
+	// 最大返回的结果数量若未被指定, 则默认值为 MAX_SEARCH
+	max_result = (max_result ? max_result : MAX_SEARCH);
+
+	// 最大返回的结果数量应该在 1-500 之间 (这里的 500 是拍脑袋的, 通常应该够用了)
+	max_result = cap_value(max_result, 1, 500);
+	
+	// 若连一个掉落此物品的魔物都没有, 那么直接返回 0
+	if (id->mob[0].chance == 0) {
+		script_pushint(st, 0);
+		return SCRIPT_CMD_SUCCESS;
+	}
+
+	// 允许在未关联玩家的情况下执行该指令, 没关联玩家也不报错
+	// 但是若明确指定了某个角色, 但目标角色不存在的话, 那么需要报错
+	if (char_id && !(sd = map_charid2sd(char_id))) {
+		script_pushint(st, 0);
+		return SCRIPT_CMD_FAILURE;
+	}
+	else if (st->rid != 0) {
+		sd = map_id2sd(st->rid);
+	}
+
+	// 用来临时保存结果的缓存区域 <魔物编号, 掉落机率>
+	std::map<uint32, int> result_cache;
+
+	// 构建我们需要的结果, 只查询单个道具其实速度非常快, 不用担心性能过渡开销
+	for (auto const& pair : mob_db) {
+		if (mob_is_clone(pair.first)) {
+			continue;
+		}
+
+		for (int d = 0; d < MAX_MOB_DROP_TOTAL; d++) {
+			if (pair.second->dropitem[d].nameid != nameid)
+				continue;
+
+			if (rathena::util::map_exists(result_cache, pair.first)) {
+				if (result_cache[pair.first] < pair.second->dropitem[d].rate)
+					result_cache[pair.first] = pair.second->dropitem[d].rate;
+			}
+			else {
+				result_cache[pair.first] = pair.second->dropitem[d].rate;
+			}
+		}
+	}
+
+	// 根据一些掉率调整设置来处理道具的掉率, 这样最后排序的时候才能考虑进去
+	for (auto const& it : result_cache) {
+		int dropchance = it.second;
+		
+#ifdef RENEWAL_DROP
+		if (sd && battle_config.atcommand_mobinfo_type) {
+			std::shared_ptr<s_mob_db> mob = mob_db.find(it.first);
+			// 备注: 由于 pc_level_penalty_mod 内部已经判断了 mob 智能指针的有效性, 因此在此处不重复判断
+			dropchance = dropchance * pc_level_penalty_mod(sd, PENALTY_DROP, mob) / 100;
+			if (dropchance <= 0 && !battle_config.drop_rate0item)
+				dropchance = 1;
+		}
+#endif
+		if (sd && pc_isvip(sd)) // Display item rate increase for VIP
+			dropchance += (dropchance * battle_config.vip_drop_increase) / 100;
+
+#ifdef Pandas_Database_MobItem_FixedRatio
+		// 若严格固定掉率, 那么无视上面的等级惩罚、VIP掉率加成等计算
+		if (mobdrop_strict_droprate(nameid, it.first))
+			dropchance = it.second;
+#endif // Pandas_Database_MobItem_FixedRatio
+
+		result_cache[it.first] = dropchance;
+	}
+
+	// 对 result_cache 的内容进行降序排序
+	std::vector<std::pair<uint32, int>> result_sortd;
+	for (auto const& pair : result_cache) {
+		result_sortd.push_back(std::make_pair(pair.first, pair.second));
+	}
+
+	// 先按魔物编号从小到大排序
+	std::sort(result_sortd.begin(), result_sortd.end(),
+		[](const std::pair<uint32, int>& a, const std::pair<uint32, int>& b) {
+			return a.first < b.first;
+		}
+	);
+
+	// 再按掉率从大到小排序
+	std::sort(result_sortd.begin(), result_sortd.end(),
+		[](const std::pair<uint32, int>& a, const std::pair<uint32, int>& b) {
+			return a.second > b.second;
+		}
+	);
+
+	// 若排序后的 result_sortd 没有任何结果, 那么直接返回即可
+	if (result_sortd.empty()) {
+		script_pushint(st, 0);
+		return SCRIPT_CMD_SUCCESS;
+	}
+
+	// 准备就绪, 开始填充数组内容并返回结果
+	int current_index = 0;
+
+	for (const auto& it : result_sortd) {
+		int dropchance = it.second;
+
+		std::shared_ptr<s_mob_db> mob = mob_db.find(it.first);
+		if (!mob) continue;
+
+		script_both_setreg(st, "whodropitem_mob_id", mob->id, true, current_index, char_id);
+		script_both_setregstr(st, "whodropitem_mob_jname$", mob->jname.c_str(), true, current_index, char_id);
+		script_both_setreg(st, "whodropitem_chance", dropchance, true, current_index, char_id);
+		
+		current_index++;
+
+		if (current_index >= max_result)
+			break;
+	}
+
+	script_both_setreg(st, "whodropitem_count", current_index, false, 0, char_id);
+	script_pushint(st, current_index);
+	return SCRIPT_CMD_SUCCESS;
+}
+#endif // Pandas_ScriptCommand_WhoDropItem
+
 // PYHELP - SCRIPTCMD - INSERT POINT - <Section 2>
 
 /// script command definitions
@@ -31689,7 +32309,14 @@ struct script_function buildin_func[] = {
 	BUILDIN_DEF(getitemslots,"i"),
 	BUILDIN_DEF(makepet,"i"),
 	BUILDIN_DEF(getexp,"ii?"),
+#ifndef Pandas_ScriptCommand_GetInventoryList
 	BUILDIN_DEF(getinventorylist,"?"),
+#else
+	BUILDIN_DEF(getinventorylist,"??"),
+	BUILDIN_DEF2(getinventorylist,"getcartlist","??"),
+	BUILDIN_DEF2(getinventorylist,"getguildstoragelist", "??"),
+	BUILDIN_DEF2(getinventorylist,"getstoragelist", "???"),
+#endif // Pandas_ScriptCommand_GetInventoryList
 	BUILDIN_DEF(getskilllist,"?"),
 	BUILDIN_DEF(clearitem,"?"),
 	BUILDIN_DEF(classchange,"i??"),
@@ -32115,6 +32742,7 @@ struct script_function buildin_func[] = {
 	BUILDIN_DEF(openbank,"?"),
 	BUILDIN_DEF(getbaseexp_ratio, "i??"),
 	BUILDIN_DEF(getjobexp_ratio, "i??"),
+	BUILDIN_DEF(enchantgradeui, "?" ),
 
 	// -----------------------------------------------------------------
 	// 熊猫模拟器拓展脚本指令 - 开始
@@ -32196,7 +32824,10 @@ struct script_function buildin_func[] = {
 	BUILDIN_DEF2(getequipexpiretick, "isrental", "i?"),	// 指定一个别名, 以便兼容的老版本或其他服务端
 #endif // Pandas_ScriptCommand_GetEquipExpireTick
 #ifdef Pandas_ScriptCommand_GetInventoryInfo
-	BUILDIN_DEF(getinventoryinfo, "ii?"),				// 查询指定背包序号的道具的详细信息 [Sola丶小克]
+	BUILDIN_DEF(getinventoryinfo, "ii?"),							// 查询指定背包序号的道具详细信息 [Sola丶小克]
+	BUILDIN_DEF2(getinventoryinfo, "getcartinfo", "ii?"),			// 查询指定手推车序号的道具详细信息 [Sola丶小克]
+	BUILDIN_DEF2(getinventoryinfo, "getguildstorageinfo", "ii?"),	// 查询指定公会仓库序号的道具详细信息 [Sola丶小克]
+	BUILDIN_DEF2(getinventoryinfo, "getstorageinfo", "ii??"),		// 查询指定个人仓库/扩充仓库序号的道具详细信息 [Sola丶小克]
 #endif // Pandas_ScriptCommand_GetInventoryInfo
 #ifdef Pandas_ScriptCommand_StatusCheck
 	BUILDIN_DEF(statuscheck, "i?"),						// 判断状态是否存在, 并取得相关的状态参数 [Sola丶小克]
@@ -32369,6 +33000,12 @@ struct script_function buildin_func[] = {
 #ifdef Pandas_ScriptCommand_GetRateIdx
 	BUILDIN_DEF(getrateidx,"*"),						// 随机获取一个数值型数组的索引序号 [Sola丶小克]
 #endif // Pandas_ScriptCommand_GetRateIdx
+#ifdef Pandas_ScriptCommand_GetBossInfo
+	BUILDIN_DEF(getbossinfo,"???"),						// 查询 BOSS 魔物重生时间及其坟墓等信息 [Sola丶小克]
+#endif // Pandas_ScriptCommand_GetBossInfo
+#ifdef Pandas_ScriptCommand_WhoDropItem
+	BUILDIN_DEF(whodropitem,"v??"),						// 查询指定道具会从哪些魔物身上掉落以及掉落的机率信息 [Sola丶小克]
+#endif // Pandas_ScriptCommand_WhoDropItem
 	// PYHELP - SCRIPTCMD - INSERT POINT - <Section 3>
 
 #include "../custom/script_def.inc"

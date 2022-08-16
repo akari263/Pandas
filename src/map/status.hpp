@@ -144,6 +144,59 @@ public:
 
 extern AttributeDatabase elemental_attribute_db;
 
+enum e_enchantgrade_result{
+	ENCHANTGRADE_UPGRADE_SUCCESS,
+	ENCHANTGRADE_UPGRADE_FAILED,
+	ENCHANTGRADE_UPGRADE_DOWNGRADE,
+	ENCHANTGRADE_UPGRADE_BREAK,
+	ENCHANTGRADE_UPGRADE_PROTECTED,
+};
+
+struct s_enchantgradeoption{
+	uint16 id;
+	t_itemid item;
+	uint16 amount;
+	uint32 zeny;
+	uint16 breaking_rate;
+	uint16 downgrade_amount;
+};
+
+struct s_enchantgradelevel{
+	e_enchantgrade grade;
+	uint16 refine;
+	uint16 chance;
+	uint16 bonus;
+	bool announce;
+	struct{
+		t_itemid item;
+		uint16 amountPerStep;
+		uint16 maximumSteps;
+		uint16 chanceIncrease;
+	}catalyst;
+	std::map<uint16,std::shared_ptr<s_enchantgradeoption>> options;
+};
+
+struct s_enchantgrade{
+	uint16 itemtype;
+	std::map<uint16,std::map<e_enchantgrade,std::shared_ptr<s_enchantgradelevel>>> levels;
+};
+
+class EnchantgradeDatabase : public TypesafeYamlDatabase<uint16, s_enchantgrade>{
+public:
+	EnchantgradeDatabase() : TypesafeYamlDatabase( "ENCHANTGRADE_DB", 1 ){
+
+	}
+
+	const std::string getDefaultLocation() override;
+	uint64 parseBodyNode( const ryml::NodeRef& node ) override;
+	void loadingFinished() override;
+
+	// Additional
+	std::shared_ptr<s_enchantgradelevel> findCurrentLevelInfo( const struct item_data& data, struct item& item );
+};
+
+extern EnchantgradeDatabase enchantgrade_db;
+
 /// Status changes listing. These code are for use by the server.
 enum sc_type : int16 {
 	SC_NONE = -1,
@@ -1173,6 +1226,10 @@ enum sc_type : int16 {
 	SC_DEEP_POISONING_OPTION,
 	SC_POISON_SHIELD,
 	SC_POISON_SHIELD_OPTION,
+	SC_M_LIFEPOTION,
+	SC_S_MANAPOTION,
+
+	SC_SUB_WEAPONPROPERTY,
 
 #ifdef RENEWAL
 	SC_EXTREMITYFIST2, //! NOTE: This SC should be right before SC_MAX, so it doesn't disturb if RENEWAL is disabled
@@ -2831,7 +2888,6 @@ enum e_status_change_flag : uint16 {
 	SCF_REMOVEONCHANGEMAP,
 	SCF_REMOVEONMAPWARP,
 	SCF_REMOVECHEMICALPROTECT,
-	SCF_OVERLAPFAIL,
 	SCF_OVERLAPIGNORELEVEL,
 	SCF_SENDOPTION,
 	SCF_ONTOUCH,
@@ -3315,101 +3371,5 @@ uint16 status_efst_get_bl_type(enum efst_type efst);
 void status_readdb( bool reload = false );
 void do_init_status(void);
 void do_final_status(void);
-
-#ifdef Pandas_YamlBlastCache_Serialize
-namespace boost {
-	namespace serialization {
-		// ======================================================================
-		// struct weapon_atk
-		// ======================================================================
-
-		template <typename Archive>
-		void serialize(Archive& ar, struct weapon_atk& t, const unsigned int version)
-		{
-			ar& t.atk;
-			ar& t.atk2;
-			ar& t.range;
-			ar& t.ele;
-#ifdef RENEWAL
-			ar& t.matk;
-			ar& t.wlv;
-#endif
-		}
-
-		// ======================================================================
-		// struct status_data
-		// ======================================================================
-
-		template <typename Archive>
-		void serialize(Archive& ar, struct status_data& t, const unsigned int version)
-		{
-			ar& t.hp;
-			ar& t.sp;
-			ar& t.ap;
-
-			ar& t.max_hp;
-			ar& t.max_sp;
-			ar& t.max_ap;
-
-			ar& t.str;
-			ar& t.agi;
-			ar& t.vit;
-			ar& t.int_;
-			ar& t.dex;
-			ar& t.luk;
-
-			ar& t.pow;
-			ar& t.sta;
-			ar& t.wis;
-			ar& t.spl;
-			ar& t.con;
-			ar& t.crt;
-
-			ar& t.eatk;
-			ar& t.batk;
-#ifdef RENEWAL
-			ar& t.watk;
-			ar& t.watk2;
-#endif
-			ar& t.matk_min;
-			ar& t.matk_max;
-			ar& t.speed;
-			ar& t.amotion;
-			ar& t.adelay;
-			ar& t.dmotion;
-
-			ar& t.mode;
-
-			ar& t.hit;
-			ar& t.flee;
-			ar& t.cri;
-			ar& t.flee2;
-			ar& t.def2;
-			ar& t.mdef2;
-#ifdef RENEWAL_ASPD
-			ar& t.aspd_rate2;
-#endif
-			ar& t.aspd_rate;
-			ar& t.patk;
-			ar& t.smatk;
-			ar& t.res;
-			ar& t.mres;
-			ar& t.hplus;
-			ar& t.crate;
-
-			ar& t.def;
-			ar& t.mdef;
-
-			ar& t.def_ele;
-			ar& t.ele_lv;
-			ar& t.size;
-			ar& t.race;
-			ar& t.class_;
-			ar& t.rhw;
-			ar& t.lhw;
-		}
-	} // namespace serialization
-} // namespace boost
-#endif // Pandas_YamlBlastCache_Serialize
 
 #endif /* STATUS_HPP */

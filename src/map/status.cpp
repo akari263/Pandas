@@ -552,6 +552,401 @@ uint64 SizeFixDatabase::parseBodyNode(const ryml::NodeRef& node) {
 
 SizeFixDatabase size_fix_db;
 
+const std::string EnchantgradeDatabase::getDefaultLocation(){
+	return std::string(db_path) + "/enchantgrade.yml";
+}
+
+uint64 EnchantgradeDatabase::parseBodyNode( const ryml::NodeRef& node ){
+	if( !this->nodesExist( node, { "Type", "Levels" } ) ){
+		return 0;
+	}
+
+	std::string itemtype_constant;
+
+	if( !this->asString( node, "Type", itemtype_constant ) ){
+		return 0;
+	}
+
+	int64 constant_value;
+
+	if( !script_get_constant( ( "IT_" + itemtype_constant ).c_str(), &constant_value ) ){
+		this->invalidWarning( node["Type"], "Unknown item type \"%s\".\n", itemtype_constant.c_str() );
+		return 0;
+	}
+
+	uint16 itemtype = static_cast<uint16>( constant_value );
+	uint16 itemtype_maxlevel;
+
+	if( itemtype == IT_WEAPON ){
+		itemtype_maxlevel = MAX_WEAPON_LEVEL;
+	}else if( itemtype == IT_ARMOR ){
+		itemtype_maxlevel = MAX_ARMOR_LEVEL;
+	}else{
+		this->invalidWarning( node["Type"], "Item type \"%s\" is not supported.\n", itemtype_constant.c_str() );
+		return 0;
+	}
+
+	std::shared_ptr<s_enchantgrade> enchantgrade = this->find( itemtype );
+	bool exists = enchantgrade != nullptr;
+
+	if( !exists ){
+		enchantgrade = std::make_shared<s_enchantgrade>();
+		enchantgrade->itemtype = itemtype;
+	}
+
+	for( const ryml::NodeRef& levelNode : node["Levels"] ){
+		if( !this->nodesExist( levelNode, { "Level", "Grades" } ) ){
+			return 0;
+		}
+
+		uint16 level;
+
+		if( !this->asUInt16( levelNode, "Level", level ) ){
+			return 0;
+		}
+
+		if( level == 0 || level > itemtype_maxlevel ){
+			this->invalidWarning( levelNode["Level"], "Level %hu is invalid for item type %s[1~%hu].\n", level, itemtype_constant.c_str(), itemtype_maxlevel );
+			return 0;
+		}
+
+		std::map<e_enchantgrade, std::shared_ptr<s_enchantgradelevel>>& grades = enchantgrade->levels[level];
+
+		for( const ryml::NodeRef& gradeNode : levelNode["Grades"] ){
+			std::string gradeConstant;
+
+			if( !this->asString( gradeNode, "Grade", gradeConstant ) ){
+				return 0;
+			}
+
+			if( !script_get_constant( ( "ENCHANTGRADE_" + gradeConstant ).c_str(), &constant_value ) ){
+				this->invalidWarning( node["Grade"], "Unknown grade \"%s\".\n", gradeConstant.c_str() );
+				return 0;
+			}
+
+			if( constant_value >= MAX_ENCHANTGRADE ){
+				this->invalidWarning( gradeNode["Grade"], "Grade %" PRId64 " is too high. Maximum: %hu.\n", constant_value, MAX_ENCHANTGRADE - 1 );
+				return 0;
+			}
+
+			e_enchantgrade gradeLevel = (e_enchantgrade)constant_value;
+
+			std::shared_ptr<s_enchantgradelevel> grade = util::map_find( grades, gradeLevel );
+			bool gradeExists = grade != nullptr;
+
+			if( !gradeExists ){
+				grade = std::make_shared<s_enchantgradelevel>();
+				grade->grade = gradeLevel;
+
+				if( !this->nodesExist( gradeNode, { "Refine", "Chance", "Options" } ) ){
+					return 0;
+				}
+			}
+
+			if( this->nodeExists( gradeNode, "Refine" ) ){
+				uint16 refine;
+
+				if( !this->asUInt16( gradeNode, "Refine", refine ) ){
+					return 0;
+				}
+
+				if( refine > MAX_REFINE ){
+					this->invalidWarning( gradeNode["Refine"], "Refine %hu is too high, capping to %hu...\n", refine, MAX_REFINE );
+					refine = MAX_REFINE;
+				}
+
+				grade->refine = refine;
+			}
+
+			if( this->nodeExists( gradeNode, "Chance" ) ){
+				uint16 chance;
+
+				if( !this->asUInt16Rate( gradeNode, "Chance", chance ) ){
+					return 0;
+				}
+
+				grade->chance = chance;
+			}
+
+			if( this->nodeExists( gradeNode, "Bonus" ) ){
+				uint16 bonus;
+
+				if( !this->asUInt16( gradeNode, "Bonus", bonus ) ){
+					return 0;
+				}
+
+				grade->bonus = bonus;
+			}else{
+				if( !gradeExists ){
+					grade->bonus = 0;
+				}
+			}
+
+			if( this->nodeExists( gradeNode, "Announce" ) ){
+				bool announce;
+
+				if( !this->asBool( gradeNode, "Announce", announce ) ){
+					return 0;
+				}
+
+				grade->announce = announce;
+			}else{
+				if( !gradeExists ){
+					grade->announce = true;
+				}
+			}
+
+			if( this->nodeExists( gradeNode, "Catalyst") ){
+				const ryml::NodeRef& catalystNode = gradeNode["Catalyst"];
+
+				if( this->nodeExists( catalystNode, "Item" ) ){
+					std::string itemName;
+
+					if( !this->asString( catalystNode, "Item", itemName ) ){
+						return 0;
+					}
+
+					std::shared_ptr<item_data> id = item_db.search_aegisname( itemName.c_str() );
+
+					if( id == nullptr ){
+						this->invalidWarning( catalystNode["Item"], "Unknown item \"%s\".\n", itemName.c_str() );
+						return 0;
+					}
+
+					grade->catalyst.item = id->nameid;
+				}else{
+					if( !gradeExists ){
+						grade->catalyst.item = 0;
+					}
+				}
+
+				if( this->nodeExists( catalystNode, "AmountPerStep" ) ){
+					uint16 amountPerStep;
+
+					if( !this->asUInt16( catalystNode, "AmountPerStep", amountPerStep ) ){
+						return 0;
+					}
+
+					grade->catalyst.amountPerStep = amountPerStep;
+				}else{
+					if( !gradeExists ){
+						grade->catalyst.amountPerStep = 0;
+					}
+				}
+
+				if( this->nodeExists( catalystNode, "MaximumSteps" ) ){
+					uint16 maximumSteps;
+
+					if( !this->asUInt16( catalystNode, "MaximumSteps", maximumSteps ) ){
+						return 0;
+					}
+
+					grade->catalyst.maximumSteps = maximumSteps;
+				}else{
+					if( !gradeExists ){
+						grade->catalyst.maximumSteps = 0;
+					}
+				}
+
+				if( this->nodeExists( catalystNode, "ChanceIncrease" ) ){
+					uint16 chanceIncrease;
+
+					if( !this->asUInt16Rate( catalystNode, "ChanceIncrease", chanceIncrease ) ){
+						return 0;
+					}
+
+					grade->catalyst.chanceIncrease = chanceIncrease;
+				}else{
+					if( !gradeExists ){
+						grade->catalyst.chanceIncrease = 0;
+					}
+				}
+			}else{
+				if( !gradeExists ){
+					grade->catalyst.item = 0;
+					grade->catalyst.amountPerStep = 0;
+					grade->catalyst.maximumSteps = 0;
+					grade->catalyst.chanceIncrease = 0;
+				}
+			}
+
+			if( this->nodeExists( gradeNode, "Options" ) ){
+				for( const ryml::NodeRef& optionNode : gradeNode["Options"] ){
+					uint16 optionIndex;
+
+					if( !this->asUInt16( optionNode, "Option", optionIndex ) ){
+						return 0;
+					}
+
+					std::shared_ptr<s_enchantgradeoption> option = util::map_find( grade->options, optionIndex );
+					bool optionExists = option != nullptr;
+
+					if( !optionExists ){
+						option = std::make_shared<s_enchantgradeoption>();
+						option->id = optionIndex;
+					}
+
+					if( this->nodeExists( optionNode, "Amount" ) ){
+						uint16 amount;
+
+						if( !this->asUInt16( optionNode, "Amount", amount ) ){
+							return 0;
+						}
+
+						if( amount > MAX_AMOUNT ){
+							this->invalidWarning( optionNode["Amount"], "Amount %hu is too high, capping to %hu...\n", amount, MAX_AMOUNT );
+							amount = MAX_AMOUNT;
+						}
+
+						if( amount == 0 ){
+							if( grade->options.erase( optionIndex ) > 0 ){
+								continue;
+							}else{
+								this->invalidWarning( optionNode["Amount"], "Trying to remove invalid option %hu...\n", optionIndex );
+								return 0;
+							}
+						}
+
+						option->amount = amount;
+					}else{
+						if( !optionExists ){
+							option->amount = 1;
+						}
+					}
+
+					if( this->nodeExists( optionNode, "Item" ) ){
+						std::string itemName;
+
+						if( !this->asString( optionNode, "Item", itemName ) ){
+							return 0;
+						}
+
+						std::shared_ptr<item_data> id = item_db.search_aegisname( itemName.c_str() );
+
+						if( id == nullptr ){
+							this->invalidWarning( optionNode["Item"], "Unknown item \"%s\".\n", itemName.c_str() );
+							return 0;
+						}
+
+						option->item = id->nameid;
+					}else{
+						if( !optionExists ){
+							option->item = 0;
+						}
+					}
+
+					if( this->nodeExists( optionNode, "Zeny" ) ){
+						uint32 zeny;
+
+						if( !this->asUInt32( optionNode, "Zeny", zeny ) ){
+							return 0;
+						}
+
+						option->zeny = zeny;
+					}else{
+						if( !optionExists ){
+							option->zeny = 0;
+						}
+					}
+
+					if( this->nodeExists( optionNode, "BreakingRate" ) ){
+						uint16 breaking_rate;
+
+						if( !this->asUInt16Rate( optionNode, "BreakingRate", breaking_rate ) ){
+							return 0;
+						}
+
+						option->breaking_rate = breaking_rate;
+					}else{
+						if( !optionExists ){
+							option->breaking_rate = 0;
+						}
+					}
+
+					if( this->nodeExists( optionNode, "DowngradeAmount" ) ){
+						uint16 downgrade_amount;
+
+						if( !this->asUInt16( optionNode, "DowngradeAmount", downgrade_amount ) ){
+							return 0;
+						}
+
+						if( downgrade_amount > MAX_REFINE ){
+							this->invalidWarning( optionNode["DowngradeAmount"], "Downgrade amount %hu is invalid, skipping.\n", downgrade_amount );
+							return 0;
+						}
+
+						option->downgrade_amount = downgrade_amount;
+					}else{
+						if( !optionExists ){
+							option->downgrade_amount = 0;
+						}
+					}
+
+					if( !optionExists ){
+						grade->options[optionIndex] = option;
+					}
+				}
+			}
+
+			if( !gradeExists ){
+				grades[gradeLevel] = grade;
+			}
+		}
+	}
+
+	if( !exists ){
+		this->put( itemtype, enchantgrade );
+	}
+
+	return 1;
+}
+
+std::shared_ptr<s_enchantgradelevel> EnchantgradeDatabase::findCurrentLevelInfo( const struct item_data& data, struct item& item ){
+	std::shared_ptr<s_enchantgrade> enchantgrade = enchantgrade_db.find( data.type );
+
+	// Unsupported item type - no answer
+	if( enchantgrade == nullptr ){
+		return nullptr;
+	}
+
+	uint16 level = 0;
+
+	if( data.type == IT_WEAPON ){
+		level = data.weapon_level;
+	}else if( data.type == IT_ARMOR ){
+		level = data.armor_level;
+	}
+
+	const auto& enchantgradelevels = enchantgrade->levels.find( level );
+
+	// Cannot upgrade this weapon or armor level - no answer
+	if( enchantgradelevels == enchantgrade->levels.end() ){
+		return nullptr;
+	}
+
+	return util::map_find( enchantgradelevels->second, (e_enchantgrade)( item.enchantgrade - 1 ) );
+}
+
+void EnchantgradeDatabase::loadingFinished(){
+	for( const auto& it_itemTypes : *this ){
+		for( const auto& it_itemLevels : it_itemTypes.second->levels ){
+			for( const auto& it_enchantgrades : it_itemLevels.second ){
+				std::shared_ptr<s_enchantgradelevel> enchantgradelevel = it_enchantgrades.second;
+
+				if( enchantgradelevel->catalyst.amountPerStep == 0 ){
+					enchantgradelevel->catalyst.item = 0;
+					enchantgradelevel->catalyst.chanceIncrease = 0;
+					enchantgradelevel->catalyst.maximumSteps = 0;
+				}
+			}
+		}
+	}
+
+	TypesafeYamlDatabase::loadingFinished();
+}
+
+EnchantgradeDatabase enchantgrade_db;
+
 /**
  * Get icon ID of SC
  * @param type: SC type
@@ -1553,7 +1948,7 @@ bool status_check_skilluse(struct block_list *src, struct block_list *target, ui
 			return false;
 		}
 
-		if (skill_id && sc->cant.cast && skill_id != RK_REFRESH && skill_id != SU_GROOMING && skill_id != SR_GENTLETOUCH_CURE) { // Stuned/Frozen/etc
+		if (skill_id > 0 && sc->opt1 && sc->opt1 != OPT1_STONEWAIT && sc->opt1 != OPT1_BURNING && skill_id != RK_REFRESH && skill_id != SU_GROOMING && skill_id != SR_GENTLETOUCH_CURE) { // Stuned/Frozen/etc
 			if (flag != 1) // Can't cast, casted stuff can't damage.
 				return false;
 			if (skill_get_casttype(skill_id) == CAST_DAMAGE)
@@ -3450,6 +3845,13 @@ int status_calc_pc_sub(struct map_session_data* sd, uint8 opt)
 			sd->inventory.u.items_inventory[index].refine = MAX_REFINE;
 
 		std::shared_ptr<s_refine_level_info> info = refine_db.findCurrentLevelInfo( *sd->inventory_data[index], sd->inventory.u.items_inventory[index] );
+#ifdef RENEWAL
+		std::shared_ptr<s_enchantgradelevel> enchantgrade_info = nullptr;
+
+		if( sd->inventory.u.items_inventory[index].enchantgrade > 0 ){
+			enchantgrade_info = enchantgrade_db.findCurrentLevelInfo( *sd->inventory_data[index], sd->inventory.u.items_inventory[index] );
+		}
+#endif
 
 		if (sd->inventory_data[index]->type == IT_WEAPON) {
 			int wlv = sd->inventory_data[index]->weapon_level;
@@ -3471,7 +3873,9 @@ int status_calc_pc_sub(struct map_session_data* sd, uint8 opt)
 				wa->atk2 += info->bonus / 100;
 
 #ifdef RENEWAL
-				// TODO: additional grade bonus
+				if( enchantgrade_info != nullptr ){
+					wa->atk2 += ( ( ( info->bonus / 100 ) * enchantgrade_info->bonus ) / 100 );
+				}
 
 				if( wlv == 5 ){
 					base_status->patk += sd->inventory.u.items_inventory[index].refine * 2;
@@ -3488,7 +3892,9 @@ int status_calc_pc_sub(struct map_session_data* sd, uint8 opt)
 			if( info != nullptr && sd->weapontype1 != W_BOW ){
 				wa->matk += info->bonus / 100;
 
-				// TODO: additional grade bonus
+				if( enchantgrade_info != nullptr ){
+					wa->matk += ( ( ( info->bonus / 100 ) * enchantgrade_info->bonus ) / 100 );
+				}
 			}
 #endif
 			// Overrefine bonus.
@@ -3578,10 +3984,10 @@ int status_calc_pc_sub(struct map_session_data* sd, uint8 opt)
 
 			// Check combo items
 			while (j < item_combo->nameid.size()) {
-				item_data *id = itemdb_exists(item_combo->nameid[j]);
+				std::shared_ptr<item_data> id = item_db.find(item_combo->nameid[j]);
 
 				// Don't run the script if at least one of combo's pair has restriction
-				if (id && !pc_has_permission(sd, PC_PERM_USE_ALL_EQUIPMENT) && itemdb_isNoEquip(id, sd->bl.m)) {
+				if (id && !pc_has_permission(sd, PC_PERM_USE_ALL_EQUIPMENT) && itemdb_isNoEquip(id.get(), sd->bl.m)) {
 					no_run = true;
 					break;
 				}
@@ -3618,7 +4024,6 @@ int status_calc_pc_sub(struct map_session_data* sd, uint8 opt)
 
 		if (sd->inventory_data[index]) {
 			int j;
-			struct item_data *data;
 
 			// Card script execution.
 			if (itemdb_isspecial(sd->inventory.u.items_inventory[index].card[0]))
@@ -3628,17 +4033,19 @@ int status_calc_pc_sub(struct map_session_data* sd, uint8 opt)
 				current_equip_card_id= c;
 				if(!c)
 					continue;
-				data = itemdb_exists(c);
+
+				std::shared_ptr<item_data> data = item_db.find(c);
+
 				if(!data)
 					continue;
-				if (opt&SCO_FIRST && data->equip_script && (pc_has_permission(sd,PC_PERM_USE_ALL_EQUIPMENT) || !itemdb_isNoEquip(data,sd->bl.m))) {// Execute equip-script on login
+				if (opt&SCO_FIRST && data->equip_script && (pc_has_permission(sd,PC_PERM_USE_ALL_EQUIPMENT) || !itemdb_isNoEquip(data.get(), sd->bl.m))) {// Execute equip-script on login
 					run_script(data->equip_script,0,sd->bl.id,0);
 					if (!calculating)
 						return 1;
 				}
 				if(!data->script)
 					continue;
-				if(!pc_has_permission(sd,PC_PERM_USE_ALL_EQUIPMENT) && itemdb_isNoEquip(data,sd->bl.m)) // Card restriction checks.
+				if(!pc_has_permission(sd,PC_PERM_USE_ALL_EQUIPMENT) && itemdb_isNoEquip(data.get(), sd->bl.m)) // Card restriction checks.
 					continue;
 				if(i == EQI_HAND_L && sd->inventory.u.items_inventory[index].equip == EQP_HAND_L) { // Left hand status.
 					sd->state.lr_flag = 1;
@@ -3695,7 +4102,8 @@ int status_calc_pc_sub(struct map_session_data* sd, uint8 opt)
 	}
 
 	if (sc->count && sc->data[SC_ITEMSCRIPT]) {
-		struct item_data *data = itemdb_exists(sc->data[SC_ITEMSCRIPT]->val1);
+		std::shared_ptr<item_data> data = item_db.find(sc->data[SC_ITEMSCRIPT]->val1);
+
 		if (data && data->script)
 			run_script(data->script, 0, sd->bl.id, 0);
 	}
@@ -5028,7 +5436,7 @@ void status_calc_state( struct block_list *bl, struct status_change *sc, std::bi
 				  || (sc->data[SC_FEAR] && sc->data[SC_FEAR]->val2 > 0)
 				  || (sc->data[SC_SPIDERWEB] && sc->data[SC_SPIDERWEB]->val1)
 				  || (sc->data[SC_HIDING] && (bl->type != BL_PC || (pc_checkskill(BL_CAST(BL_PC,bl),RG_TUNNELDRIVE) <= 0)))
-				  || (sc->data[SC_DANCING] && sc->data[SC_DANCING]->val4 && (
+				  || (sc->data[SC_DANCING] && (
 #ifndef RENEWAL
 						!sc->data[SC_LONGING] ||
 #endif
@@ -8517,7 +8925,11 @@ void status_calc_slave_mode(struct mob_data *md, struct mob_data *mmd)
 			sc_start4(NULL, &md->bl, SC_MODECHANGE, 100, 1, MD_CANMOVE|MD_NORANDOMWALK|MD_CANATTACK, 0, 0, 0);
 			break;
 		default: //Copy master
+#ifndef Pandas_Crashfix_Prevent_NullPointer
 			if (status_has_mode(&mmd->status,MD_AGGRESSIVE))
+#else
+			if (mmd && status_has_mode(&mmd->status,MD_AGGRESSIVE))
+#endif // Pandas_Crashfix_Prevent_NullPointer
 				sc_start4(NULL, &md->bl, SC_MODECHANGE, 100, 1, 0, MD_AGGRESSIVE, 0, 0);
 			else
 				sc_start4(NULL, &md->bl, SC_MODECHANGE, 100, 1, 0, 0, MD_AGGRESSIVE, 0);
@@ -10256,8 +10668,6 @@ int status_change_start(struct block_list* src, struct block_list* bl,enum sc_ty
 
 	// Check for overlapping fails
 	if( (sce = sc->data[type]) ) {
-		if (scdb->flag[SCF_OVERLAPFAIL])
-			return 0;
 		switch( type ) {
 			case SC_MERC_FLEEUP:
 			case SC_MERC_ATKUP:
@@ -10729,6 +11139,8 @@ int status_change_start(struct block_list* src, struct block_list* bl,enum sc_ty
 			break;
 		case SC_S_LIFEPOTION:
 		case SC_L_LIFEPOTION:
+		case SC_M_LIFEPOTION:
+		case SC_S_MANAPOTION:
 			if( val1 == 0 ) return 0;
 			// val1 = heal percent/amout
 			// val2 = seconds between heals
@@ -11620,7 +12032,6 @@ int status_change_start(struct block_list* src, struct block_list* bl,enum sc_ty
 			break;
 		case SC_REFLECTDAMAGE:
 			val2 = 10 * val1; // Reflect reduction amount
-			val3 = val1*5 + 25; // Number of reflects
 			val4 = tick/1000; // Number of SP cycles (duration)
 			tick_time = 1000; // [GodLesZ] tick time
 			break;
@@ -12453,6 +12864,16 @@ int status_change_start(struct block_list* src, struct block_list* bl,enum sc_ty
 		case SC_DEEP_POISONING_OPTION:
 			val3 = ELE_POISON;
 			break;
+		case SC_SUB_WEAPONPROPERTY:
+			if (sd && val3 == ASC_EDP) {
+				uint16 poison_level = pc_checkskill(sd, GC_RESEARCHNEWPOISON);
+
+				if (poison_level > 0) {
+					tick += 30000; // Base of 30 seconds
+					tick += poison_level * 15 * 1000; // Additional 15 seconds per level
+				}
+			}
+			break;
 
 		default:
 			if (calc_flag.none() && scdb->skill_id == 0 && scdb->icon == EFST_BLANK && scdb->opt1 == OPT1_NONE && scdb->opt2 == OPT2_NONE && scdb->state.none() && scdb->flag.none() && scdb->end.empty() && scdb->endreturn.empty() && scdb->fail.empty()) {
@@ -12678,7 +13099,7 @@ int status_change_start(struct block_list* src, struct block_list* bl,enum sc_ty
 		sce->timer = INVALID_TIMER; // Infinite duration
 
 	if (calc_flag.any()) {
-		if (sd) {
+		if (sd != nullptr) {
 			switch(type) {
 				// Statuses that adjust HP/SP and heal after starting
 				case SC_BERSERK:
@@ -12687,7 +13108,8 @@ int status_change_start(struct block_list* src, struct block_list* bl,enum sc_ty
 					status_calc_bl_(bl, calc_flag, SCO_FORCE);
 					break;
 				default:
-					status_calc_bl_(bl, calc_flag);
+					if (!sd->state.connect_new)
+						status_calc_bl_(bl, calc_flag);
 					break;
 			}
 		} else
@@ -12698,23 +13120,8 @@ int status_change_start(struct block_list* src, struct block_list* bl,enum sc_ty
 	if (sc_isnew && scdb->state.any())
 		status_calc_state(bl, sc, scdb->state, true);
 
-	if (sd) {
-		if (sd->pd)
-			pet_sc_check(sd, type); // Skotlex: Pet Status Effect Healing
-#ifndef Pandas_Fix_Status_Change_Start_Infinite_Recalculate_Status
-		switch (type) {
-			case SC_BERSERK:
-			case SC_MERC_HPUP:
-			case SC_MERC_SPUP:
-				status_calc_pc(sd, SCO_FORCE);
-				break;
-			default:
-				if (!sd->state.connect_new)
-					status_calc_pc(sd, SCO_NONE);
-				break;
-		}
-#endif // Pandas_Fix_Status_Change_Start_Infinite_Recalculate_Status
-	}
+	if (sd != nullptr && sd->pd != nullptr)
+		pet_sc_check(sd, type); // Skotlex: Pet Status Effect Healing
 
 	// 1st thing to execute when loading status
 	switch (type) {
@@ -13822,6 +14229,7 @@ TIMER_FUNC(status_change_timer){
 			map_freeblock_lock();
 			dounlock = true;
 			status_fix_damage(bl, bl, 100, clif_damage(bl, bl, tick, status->amotion, status->dmotion + 500, 100, 1, DMG_NORMAL, 0, false),0);
+			unit_skillcastcancel(bl, 2);
 		}
 		break;
 		
@@ -13862,12 +14270,25 @@ TIMER_FUNC(status_change_timer){
 
 	case SC_S_LIFEPOTION:
 	case SC_L_LIFEPOTION:
+	case SC_M_LIFEPOTION:
 		if( --(sce->val4) >= 0 ) {
 			// val1 < 0 = per max% | val1 > 0 = exact amount
 			int hp = 0;
 			if( status->hp < status->max_hp )
 				hp = (sce->val1 < 0) ? (int)(status->max_hp * -1 * sce->val1 / 100.) : sce->val1;
 			status_heal(bl, hp, 0, 2);
+			sc_timer_next((sce->val2 * 1000) + tick);
+			return 0;
+		}
+		break;
+
+	case SC_S_MANAPOTION:
+		if( --(sce->val4) >= 0 ) {
+			// val1 < 0 = per max% | val1 > 0 = exact amount
+			int sp = 0;
+			if( status->sp < status->max_sp )
+				sp = (sce->val1 < 0) ? (int)(status->max_sp * -1 * sce->val1 / 100.) : sce->val1;
+			status_heal(bl, 0, sp, 2);
 			sc_timer_next((sce->val2 * 1000) + tick);
 			return 0;
 		}
@@ -14250,13 +14671,17 @@ TIMER_FUNC(status_change_timer){
 
 	case SC_OVERHEAT_LIMITPOINT:
 		if (--(sce->val1) >= 0) { // Cooling
-			static std::vector<int16> limit = { 150, 200, 280, 360, 450 };
-			uint16 skill_lv = (sd ? cap_value(pc_checkskill(sd, NC_MAINFRAME), 0, (uint16)(limit.size()-1)) : 0);
+			if (sce->val2 == 0) { // Flag the overheat limit once it has been met.
+				static std::vector<int16> limit = { 150, 200, 280, 360, 450 };
+				uint16 skill_lv = (sd ? cap_value(pc_checkskill(sd, NC_MAINFRAME), 0, (uint16)(limit.size() - 1)) : 0);
 
-			if (sc && sc->data[SC_OVERHEAT])
-				status_change_end(bl,SC_OVERHEAT,INVALID_TIMER);
-			if (sce->val1 > limit[skill_lv])
-				sc_start(bl, bl, SC_OVERHEAT, 100, sce->val1, 1000);
+				if (sce->val1 > limit[skill_lv])
+					sce->val2 = 1;
+			} else {
+				status_change_end(bl, SC_OVERHEAT, INVALID_TIMER);
+				if (sce->val2 > 0)
+					sc_start(bl, bl, SC_OVERHEAT, 100, sce->val1, 975);
+			}
 			sc_timer_next(1000 + tick);
 			return 0;
 		}
@@ -14268,10 +14693,8 @@ TIMER_FUNC(status_change_timer){
 			if (damage >= status->hp)
 				damage = status->hp - 1; // Do not kill, just keep you with 1 hp minimum
 			map_freeblock_lock();
-			status_fix_damage(NULL, bl, damage, clif_damage(bl, bl, tick, 0, 0, damage, 0, DMG_NORMAL, 0, false),0);
-			if (sc->data[type]) {
-				sc_timer_next(1000 + tick);
-			}
+			status_zap(bl, damage, 0);
+			sc_timer_next(975 + tick); // Tick is not 1000 to avoid desync with SC_OVERHEAT_LIMITPOINT.
 			map_freeblock_unlock();
 			return 0;
 		}
@@ -14547,7 +14970,7 @@ TIMER_FUNC(status_change_timer){
 		break;
 	case SC_FRESHSHRIMP:
 		if (--(sce->val4) >= 0) {
-			status_heal(bl, sce->val2, 0, 3);
+			status_heal(bl, sce->val2, 0, 0);
 			sc_timer_next((10000 - ((sce->val1 - 1) * 1000)) + tick);
 			return 0;
 		}
@@ -15755,6 +16178,8 @@ void StatusDatabase::loadingFinished(){
 			this->StatusRelevantBLTypes[status->icon] = BL_PC;
 		}
 	}
+
+	TypesafeCachedYamlDatabase::loadingFinished();
 }
 
 StatusDatabase status_db;
@@ -15804,10 +16229,12 @@ void status_readdb( bool reload ){
 		size_fix_db.reload();
 		refine_db.reload();
 		status_db.reload();
+		enchantgrade_db.reload();
 	}else{
 		size_fix_db.load();
 		refine_db.load();
 		status_db.load();
+		enchantgrade_db.load();
 	}
 	elemental_attribute_db.load();
 }
@@ -15831,6 +16258,7 @@ void do_init_status(void) {
 /** Destroy status data */
 void do_final_status(void) {
 	ers_destroy(sc_data_ers);
+	enchantgrade_db.clear();
 	size_fix_db.clear();
 	refine_db.clear();
 	status_db.clear();

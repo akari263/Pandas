@@ -2540,13 +2540,23 @@ int skill_counter_additional_effect (struct block_list* src, struct block_list *
 	sd = BL_CAST(BL_PC, src);
 	dstsd = BL_CAST(BL_PC, bl);
 
-	if(dstsd && attack_type&BF_WEAPON) {	//Counter effects.
+	if(dstsd && attack_type & BF_WEAPONMASK) {	//Counter effects.
 		for (const auto &it : dstsd->addeff_atked) {
 			rate = it.rate;
 			if (attack_type&BF_LONG)
 				rate += it.arrow_rate;
-			if (!rate)
+			if (rate == 0)
 				continue;
+
+			if ((it.flag&(ATF_WEAPON|ATF_MAGIC|ATF_MISC)) != (ATF_WEAPON|ATF_MAGIC|ATF_MISC)) {
+				// Trigger has attack type consideration.
+				if ((it.flag&ATF_WEAPON && attack_type&BF_WEAPON) ||
+					(it.flag&ATF_MAGIC && attack_type&BF_MAGIC) ||
+					(it.flag&ATF_MISC && attack_type&BF_MISC))
+					;
+				else
+					continue;
+			}
 
 			if ((it.flag&(ATF_LONG|ATF_SHORT)) != (ATF_LONG|ATF_SHORT)) {	//Trigger has range consideration.
 				if((it.flag&ATF_LONG && !(attack_type&BF_LONG)) ||
@@ -2569,12 +2579,13 @@ int skill_counter_additional_effect (struct block_list* src, struct block_list *
 		sc_start(src,src,SC_BLIND,2*skill_lv,skill_lv,skill_get_time2(skill_id,skill_lv));
 		break;
 	case HFLI_SBR44:	//[orn]
-	case HVAN_EXPLOSION:
 		if(src->type == BL_HOM){
-			TBL_HOM *hd = (TBL_HOM*)src;
-			hd->homunculus.intimacy = (skill_id == HFLI_SBR44) ? 200 : 100; // hom_intimacy_grade2intimacy(HOMGRADE_HATE_WITH_PASSION)
-			if (hd->master)
-				clif_send_homdata(hd->master,SP_INTIMATE,hd->homunculus.intimacy/100);
+			struct homun_data *hd = (struct homun_data *)src;
+			if (hd != nullptr) {
+				hd->homunculus.intimacy = hom_intimacy_grade2intimacy(HOMGRADE_HATE_WITH_PASSION);
+				if (hd->master)
+					clif_send_homdata(hd->master,SP_INTIMATE,hd->homunculus.intimacy / 100);
+			}
 		}
 		break;
 	case CR_GRANDCROSS:
@@ -2749,6 +2760,13 @@ int skill_counter_additional_effect (struct block_list* src, struct block_list *
 --------------------------------------------------------------------------*/
 int skill_break_equip(struct block_list *src, struct block_list *bl, unsigned short where, int rate, int flag)
 {
+	status_change *src_sc = status_get_sc(src);
+
+	// Grant player skills/items the ability to "break" non-player equipment.
+	// WS_MELTDOWN is exempt from this check.
+	if (!battle_config.break_mob_equip && bl->type != BL_PC && !(src_sc && src_sc->data[SC_MELTDOWN]))
+		return 0;
+
 	const int where_list[6]     = { EQP_WEAPON, EQP_ARMOR, EQP_SHIELD, EQP_HELM, EQP_ACC, EQP_SHADOW_GEAR };
 	const enum sc_type scatk[6] = { SC_STRIPWEAPON, SC_STRIPARMOR, SC_STRIPSHIELD, SC_STRIPHELM, SC__STRIPACCESSORY, SC_SHADOW_STRIP };
 	const enum sc_type scdef[6] = { SC_CP_WEAPON, SC_CP_ARMOR, SC_CP_SHIELD, SC_CP_HELM, SC_NONE, SC_PROTECTSHADOWEQUIP };
@@ -3841,6 +3859,48 @@ int64 skill_attack (int attack_type, struct block_list* src, struct block_list *
 		damage = dmg.damage + dmg.damage2;
 	}
 #endif // Pandas_Bonus3_bFinalAddClass
+
+#ifdef Pandas_NpcExpress_PCHARMED
+	if (src && bl && damage > 0) {
+		// 负责执行事件的玩家对象 (事件执行者)
+		struct map_session_data* esd = nullptr;
+
+		// 若受伤害者不是玩家单位, 那么试图获取受伤害者的主人
+		if (bl->type != BL_PC) {
+			struct block_list* mbl = nullptr;
+			mbl = battle_get_master(bl);
+			if (mbl != nullptr && mbl->type == BL_PC) {
+				esd = BL_CAST(BL_PC, mbl);
+			}
+		}
+		
+		// 若负责执行事件的玩家对象依然没被指定
+		// 且受伤害者是一个玩家单位, 那么将受伤害者直接指定成负责执行事件的玩家
+		if (!esd && bl->type == BL_PC) {
+			esd = (TBL_PC*)bl;
+		}
+
+		// 若到这里还没有一个合适的事件执行者则不需要触发事件
+		if (esd) {
+			pc_setreg(esd, add_str("@harmed_target_type"), bl->type);
+			pc_setreg(esd, add_str("@harmed_target_gid"), bl->id);
+			
+			pc_setreg(esd, add_str("@harmed_src_type"), src->type);
+			pc_setreg(esd, add_str("@harmed_src_gid"), src->id);
+			pc_setreg(esd, add_str("@harmed_src_mobid"), (src->type == BL_MOB ? ((TBL_MOB*)src)->mob_id : 0));
+			
+			pc_setreg(esd, add_str("@harmed_damage_flag"), dmg.flag);
+			pc_setreg(esd, add_str("@harmed_damage_skillid"), skill_id);
+			pc_setreg(esd, add_str("@harmed_damage_skilllv"), skill_lv);
+			pc_setreg(esd, add_str("@harmed_damage_right"), dmg.damage);
+			pc_setreg(esd, add_str("@harmed_damage_left"), dmg.damage2);
+			npc_script_event(tsd, NPCX_PCHARMED);
+			dmg.damage = (int)cap_value(pc_readreg(esd, add_str("@harmed_damage_right")), INT_MIN, INT_MAX);
+			dmg.damage2 = (int)cap_value(pc_readreg(esd, add_str("@harmed_damage_left")), INT_MIN, INT_MAX);
+			damage = dmg.damage + dmg.damage2;
+		}
+	}
+#endif // Pandas_NpcExpress_PCHARMED
 
 #ifdef Pandas_NpcExpress_PCATTACK
 	if (src && bl && damage > 0) {
@@ -7703,7 +7763,11 @@ int skill_castend_nodamage_id (struct block_list *src, struct block_list *bl, ui
 			src,skill_id,skill_lv,tick, flag|BCT_ENEMY|1, skill_castend_damage_id);
 		clif_skill_nodamage (src,src,skill_id,skill_lv,1);
 		// Initiate 20% of your damage becomes fire element.
+#ifdef RENEWAL
+		sc_start4(src,src,SC_SUB_WEAPONPROPERTY,100,3,20,skill_id,0,skill_get_time2(skill_id, skill_lv));
+#else
 		sc_start4(src,src,SC_WATK_ELEMENT,100,3,20,0,0,skill_get_time2(skill_id, skill_lv));
+#endif
 		break;
 
 	case TK_JUMPKICK:
@@ -7770,7 +7834,9 @@ int skill_castend_nodamage_id (struct block_list *src, struct block_list *bl, ui
 	case HW_MAGICPOWER:
 	case PF_MEMORIZE:
 	case PA_SACRIFICE:
+#ifndef RENEWAL
 	case ASC_EDP:
+#endif
 	case PF_DOUBLECASTING:
 	case SG_SUN_COMFORT:
 	case SG_MOON_COMFORT:
@@ -7860,6 +7926,15 @@ int skill_castend_nodamage_id (struct block_list *src, struct block_list *bl, ui
 		clif_skill_nodamage(src,bl,skill_id,skill_lv,
 			sc_start(src,bl,type,100,skill_lv,skill_get_time(skill_id,skill_lv)));
 		break;
+
+#ifdef RENEWAL
+	// EDP also give +25% WATK poison pseudo element to user.
+	case ASC_EDP:
+		clif_skill_nodamage(src,bl,skill_id,skill_lv,
+			sc_start(src,bl,type,100,skill_lv,skill_get_time(skill_id,skill_lv)));
+		sc_start4(src,src,SC_SUB_WEAPONPROPERTY,100,5,25,skill_id,0,skill_get_time2(skill_id, skill_lv));
+		break;
+#endif
 
 	case LG_SHIELDSPELL:
 		if (skill_lv == 1)
@@ -8622,6 +8697,14 @@ int skill_castend_nodamage_id (struct block_list *src, struct block_list *bl, ui
 			return 1;
 		}
 		status_damage(src, src, sstatus->max_hp,0,0,1, skill_id);
+		if(skill_id == HVAN_EXPLOSION && src->type == BL_HOM) {
+			struct homun_data *hd = (struct homun_data *)src;
+			if (hd != nullptr) {
+				hd->homunculus.intimacy = hom_intimacy_grade2intimacy(HOMGRADE_HATE_WITH_PASSION);
+				if (hd->master)
+					clif_send_homdata(hd->master,SP_INTIMATE,hd->homunculus.intimacy / 100);
+			}
+		}
 		break;
 	case AL_ANGELUS:
 #ifdef RENEWAL
@@ -9450,17 +9533,20 @@ int skill_castend_nodamage_id (struct block_list *src, struct block_list *bl, ui
 		break;
 
 	case TF_BACKSLIDING: //This is the correct implementation as per packet logging information. [Skotlex]
-		skill_blown(src,bl,skill_get_blewcount(skill_id,skill_lv),unit_getdir(bl),(enum e_skill_blown)(BLOWN_IGNORE_NO_KNOCKBACK
+		{
+			short blew_count = skill_blown(src,bl,skill_get_blewcount(skill_id,skill_lv),unit_getdir(bl),(enum e_skill_blown)(BLOWN_IGNORE_NO_KNOCKBACK
 #ifdef RENEWAL
 			|BLOWN_DONT_SEND_PACKET
 #endif
-		));
-		clif_skill_nodamage(src, bl, skill_id, skill_lv, 1);
+			));
+			clif_skill_nodamage(src, bl, skill_id, skill_lv, 1);
 #ifdef RENEWAL
-		clif_blown(src); // Always blow, otherwise it shows a casting animation. [Lemongrass]
+			if(blew_count > 0)
+				clif_blown(src); // Always blow, otherwise it shows a casting animation. [Lemongrass]
 #else
-		clif_slide(bl, bl->x, bl->y); //Show the casting animation on pre-re
+			clif_slide(bl, bl->x, bl->y); //Show the casting animation on pre-re
 #endif
+		}
 		break;
 
 	case TK_HIGHJUMP:
@@ -11135,7 +11221,7 @@ int skill_castend_nodamage_id (struct block_list *src, struct block_list *bl, ui
 					break;
 				i++;
 			}
-			pc_overheat(sd, limit[min(i, 2)]);
+			pc_overheat(*sd, limit[min(i, 2)]);
 		}
 		break;
 
@@ -12293,7 +12379,7 @@ int skill_castend_nodamage_id (struct block_list *src, struct block_list *bl, ui
 		else if (status_get_hp(bl) != status_get_max_hp(bl))
 			heal = ((2 * skill_lv - 1) * 10) * status_get_max_hp(bl) / 100;
 		clif_skill_nodamage(src, bl, skill_id, skill_lv, 1);
-		status_heal(bl, heal, 0, 1|2|4);
+		status_heal(bl, heal, 0, 0);
 	}
 		break;
 
@@ -15983,8 +16069,8 @@ int skill_unit_onplace_timer(struct skill_unit *unit, struct block_list *bl, t_t
 			break;
 
 		case UNT_POISONSMOKE:
-			if( battle_check_target(ss,bl,BCT_ENEMY) > 0 && !(tsc && tsc->data[sg->val2]) && rnd()%100 < 20 )
-				sc_start(ss,bl,(sc_type)sg->val2,100,sg->val3,skill_get_time2(GC_POISONINGWEAPON, 1));
+			if( battle_check_target(ss,bl,BCT_ENEMY) > 0 && !(tsc && tsc->data[sg->val2]) && rnd()%100 < 50 )
+				sc_start4(ss,bl,(sc_type)sg->val2,100,sg->val3,0,1,0,skill_get_time2(GC_POISONINGWEAPON, 1));
 			break;
 
 		case UNT_EPICLESIS:
@@ -18729,6 +18815,10 @@ struct s_skill_condition skill_get_requirement(struct map_session_data* sd, uint
 		req.eqItem.clear();
 		req.eqItem.shrink_to_fit();
 	}
+	if (noreq_opt & SKILL_REQ_APCOST)
+		req.ap = 0;
+	if (noreq_opt & SKILL_REQ_APRATECOST)
+		req.ap_rate = 0;
 
 	// 接下来是熊猫自定义的特殊选项
 	if (noreq_opt & SKILL_REQ_AMMO_COUNT) {
@@ -18852,11 +18942,7 @@ int skill_castfix_sc(struct block_list *bl, double time, uint8 flag)
 		}
 	}
 
-#ifndef Pandas_LGTM_Optimization
-	time = max(time, 0);
-#else
-	time = max((int)time, 0);
-#endif // Pandas_LGTM_Optimization
+	time = std::max(time, 0.0);
 	//ShowInfo("Castime castfix_sc = %f\n",time);
 
 	return (int)time;
@@ -24298,7 +24384,12 @@ uint64 SkillDatabase::parseBodyNode(const ryml::NodeRef& node) {
 
 			skill->unit_id = static_cast<uint16>(constant);
 		} else {
+#ifndef Pandas_UserExperience_Yaml_Error
 			this->invalidWarning(unitNode["Id"], "Unit requires an Id.\n");
+#else
+			// 上面都已经判断 Id 节点不存在了, 这里就不应该用 ["Id"] 啦
+			this->invalidWarning(unitNode, "Unit requires an Id.\n");
+#endif // Pandas_UserExperience_Yaml_Error
 			return 0;
 		}
 
@@ -24396,9 +24487,6 @@ uint64 SkillDatabase::parseBodyNode(const ryml::NodeRef& node) {
 					skill->unit_flag.reset(static_cast<uint8>(constant));
 			}
 
-#ifndef Pandas_YamlBlastCache_SkillDatabase
-			// 将这部分应用操作挪动到: SkillDatabase::loadingFinished 来实现
-			// 避免疾风缓存将这里的值缓存住之后导致 defunit_not_enemy 战斗配置选项无效
 			if (skill->unit_flag[UF_NOENEMY] && battle_config.defnotenemy)
 				skill->unit_target = BCT_NOENEMY;
 
@@ -24410,7 +24498,6 @@ uint64 SkillDatabase::parseBodyNode(const ryml::NodeRef& node) {
 				skill->unit_target &= ~BL_MOB;
 			if (skill->unit_flag[UF_SKILL])
 				skill->unit_target |= BL_SKILL;
-#endif // Pandas_YamlBlastCache_SkillDatabase
 		} else {
 			if (!exists){
 				skill->unit_flag = UF_NONE;
@@ -24465,25 +24552,7 @@ void SkillDatabase::loadingFinished(){
 		ShowError( "There are more skills defined in the skill database (%d) than the MAX_SKILL (%d) define. Please increase it and recompile.\n", this->skill_num, MAX_SKILL );
 	}
 
-#ifdef Pandas_YamlBlastCache_SkillDatabase
-	for (const auto& it : *this) {
-		auto skill = it.second;
-
-		// 从 parseBodyNode 把代码挪下来, 在此进行具体的战斗配置选项应用
-		// 因为疾风缓存在完成缓存的读取工作之后依然会触发 SkillDatabase::loadingFinished
-		if (skill->unit_flag[UF_NOENEMY] && battle_config.defnotenemy)
-			skill->unit_target = BCT_NOENEMY;
-
-		// By default, target just characters.
-		skill->unit_target |= BL_CHAR;
-		if (skill->unit_flag[UF_NOPC])
-			skill->unit_target &= ~BL_PC;
-		if (skill->unit_flag[UF_NOMOB])
-			skill->unit_target &= ~BL_MOB;
-		if (skill->unit_flag[UF_SKILL])
-			skill->unit_target |= BL_SKILL;
-	}
-#endif // Pandas_YamlBlastCache_SkillDatabase
+	TypesafeCachedYamlDatabase::loadingFinished();
 }
 
 /**
@@ -24501,46 +24570,6 @@ uint16 SkillDatabase::get_index( uint16 skill_id, bool silent, const char *func,
 
 	return idx;
 }
-
-#ifdef Pandas_YamlBlastCache_SkillDatabase
-//************************************
-// Method:      afterCacheRestore
-// Description: 缓存恢复完成之后对 skill_db 中的对象进行加工处理
-// Access:      public 
-// Returns:     void
-// Author:      Sola丶小克(CairoLee)  2021/04/18 22:36
-//************************************ 
-void SkillDatabase::afterCacheRestore() {
-	for (const auto& it : *this) {
-		auto skill = it.second;
-
-		// ==================================================================
-		// 初始化未参与序列化的字段, 避免内存中的脏数据对工作造成错误的影响
-		// ==================================================================
-		SERIALIZE_SET_MEMORY_ZERO(skill->nocast);
-		SERIALIZE_SET_MEMORY_ZERO(skill->damage);
-		SERIALIZE_SET_MEMORY_ZERO(skill->abra_probability);
-		SERIALIZE_SET_MEMORY_ZERO(skill->improvisedsong_rate);
-	}
-}
-
-//************************************
-// Method:      getDependsHash
-// Description: 此数据库额外依赖的缓存特征
-// Access:      public 
-// Returns:     const std::string
-// Author:      Sola丶小克(CairoLee)  2022/03/12 21:01
-//************************************ 
-const std::string SkillDatabase::getDependsHash() {
-	// 在 SkillDatabase 中使用到了 ITEM_DB 的信息
-	// 因此我们将这些数据库的缓存特征散列作为自己特征散列的一部分, 这样当他们变化时我们的缓存也认为过期
-	std::string depends = boost::str(
-		boost::format("%1%") %
-		this->getCacheHashByName("ITEM_DB")
-	);
-	return depends;
-}
-#endif // Pandas_YamlBlastCache_SkillDatabase
 
 SkillDatabase skill_db;
 

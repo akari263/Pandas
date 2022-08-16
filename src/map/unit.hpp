@@ -62,6 +62,7 @@ struct unit_data {
 		unsigned blockedmove : 1;
 		unsigned blockedskill : 1;
 		unsigned ignore_cell_stack_limit : 1;
+		bool force_walk; ///< Used with script commands unitwalk/unitwalkto. Disables monster idle and random walk.
 	} state;
 	char walk_done_event[EVENT_NAME_LENGTH];
 	char title[NAME_LENGTH];
@@ -83,11 +84,7 @@ struct view_data {
 		cloth_color,
 		body_style;
 	char sex;
-#ifndef Pandas_YamlBlastCache_Serialize
 	unsigned dead_sit : 2; // 0: Standing, 1: Dead, 2: Sitting
-#else
-	uint8 dead_sit = 0; // 0: Standing, 1: Dead, 2: Sitting
-#endif // Pandas_YamlBlastCache_Serialize
 };
 
 /// Enum for unit_blown_immune
@@ -181,33 +178,5 @@ int unit_changetarget(struct block_list *bl,va_list ap);
 
 void do_init_unit(void);
 void do_final_unit(void);
-
-#ifdef Pandas_YamlBlastCache_Serialize
-namespace boost {
-	namespace serialization {
-		// ======================================================================
-		// struct view_data
-		// ======================================================================
-
-		template <typename Archive>
-		void serialize(Archive& ar, struct view_data& t, const unsigned int version)
-		{
-			ar& t.class_;
-			ar& t.weapon;
-			ar& t.shield;
-			ar& t.robe;
-			ar& t.head_top;
-			ar& t.head_mid;
-			ar& t.head_bottom;
-			ar& t.hair_style;
-			ar& t.hair_color;
-			ar& t.cloth_color;
-			ar& t.body_style;
-			ar& t.sex;
-			ar& t.dead_sit;
-		}
-	} // namespace serialization
-} // namespace boost
-#endif // Pandas_YamlBlastCache_Serialize
 
 #endif /* UNIT_HPP */

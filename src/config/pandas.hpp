@@ -27,7 +27,6 @@
 	#define Pandas_ScriptEngine
 	#define Pandas_Redeclaration
 	#define Pandas_UserExperience
-	#define Pandas_YamlBlastCache
 	#define Pandas_Cleanup
 	#define Pandas_NpcEvent
 	#define Pandas_Mapflags
@@ -68,7 +67,7 @@
 	//         ^ 此处第四段为 1 表示这是一个 1.0.2 的开发版本 (develop)
 	// 
 	// 在 Windows 环境下, 程序启动时会根据第四段的值自动携带对应的版本后缀, 以便进行版本区分
-	#define Pandas_Version "1.1.12.0"
+	#define Pandas_Version "1.1.16.0"
 
 	// 在启动时显示 Pandas 的 LOGO
 	#define Pandas_Show_Logo
@@ -178,7 +177,7 @@
 
 	// 以下选项开关需要依赖 Pandas_Struct_Npc_Data_Pandas 的拓展
 	#ifdef Pandas_Struct_Npc_Data_Pandas
-		// 使 npc_data 结构体可记录此 npc 的自毁策略 [Sola丶小克]
+		// 使 npc_data 结构体可记录此 NPC 的自毁策略 [Sola丶小克]
 		// 结构体修改定位 npc.hpp -> npc_data.pandas.destruction_strategy
 		#define Pandas_Struct_Npc_Data_DestructionStrategy
 	#endif // Pandas_Struct_Npc_Data_Pandas
@@ -245,9 +244,6 @@
 
 	// 是否拓展 Yaml 的 Database 操作类使之能抑制错误信息 [Sola丶小克]
 	#define Pandas_Database_Yaml_BeQuiet
-
-	// 是否拓展 Yaml 的 Database 操作类使之能读取 UTF8-BOM 编码的文件 [Sola丶小克]
-	#define Pandas_Database_Yaml_Support_UTF8BOM
 
 	// 是否支持用于读取 SQL 连接编码的 Sql_GetEncoding 函数 [Sola丶小克]
 	#define Pandas_Database_SQL_GetEncoding
@@ -510,8 +506,8 @@
 		#define Pandas_Support_Specify_PacketKeys
 	#endif // PACKET_OBFUSCATION
 
-	// 是否支持读取 UTF8-BOM 编码的 libconfig 配置文件 [Sola丶小克]
-	#define Pandas_Support_Read_UTF8BOM_Configure
+	// 是否支持读取 UTF8-BOM 编码的配置或者数据文件 [Sola丶小克]
+	#define Pandas_Support_UTF8BOM_Files
 
 	// 在使用 _M/_F 注册的时候, 能够限制使用中文等字符作为游戏账号 [Sola丶小克]
 	// 这里的 PCRE_SUPPORT 在"项目属性 -> C/C++ -> 预处理器"中定义
@@ -607,10 +603,6 @@
 	// 
 	// - 能够输出目标数据库当前所使用的编码
 	// - 当在 inter_athena.conf 中指定了 codepage 时, 能提示最终使用的编码
-	// - 若目标数据库使用 utf8 或者 utf8mb4 编码则会给与提示
-	// - 若目标数据库使用 utf8 或者 utf8mb4 编码, 为了兼容性考虑会根据操作
-	//   系统语言来选择使用 gbk 或 big5 编码, 若不是简体中文也不是繁体中文则直接
-	//   使用当前数据库的 `character_set_database` 编码.
 	//
 	// --------------------------------------
 	// 改动三：用 mysql_set_character_set 来设置 MySQL 的编码字符集
@@ -686,7 +678,10 @@
 	#endif // Pandas_Struct_Map_Session_Data_Skip_LoadEndAck_NPC_Event_Dequeue
 
 	// 是否支持根据系统语言读取对应的消息数据库文件 [Sola丶小克]
-	#define Pandas_Adaptive_Importing_Message_Database
+	// 此选项依赖 Pandas_Support_UTF8BOM_Files 的拓展
+	#ifdef Pandas_Support_UTF8BOM_Files
+		#define Pandas_Adaptive_Importing_Message_Database
+	#endif // Pandas_Support_UTF8BOM_Files
 
 	// 是否支持处理 Windows 10 编码选项带来的中文乱码问题 [Sola丶小克]
 	// Beta: Use Unicode UTF-8 for worldwide language support
@@ -773,6 +768,10 @@
 	#ifdef Pandas_Struct_Mob_Data_Special_SetUnitData
 		#define Pandas_Persistent_SetUnitData_For_Monster_StatusData
 	#endif // Pandas_Struct_Mob_Data_Special_SetUnitData
+
+	// 是否扩展 e_job_types 枚举类型的可选值 [Sola丶小克]
+	// 此项目会影响默认可用的 NPC 外观数量, 提取自客户端 npcidentity.lub 文件
+	#define Pandas_Update_NPC_Identity_Information
 #endif // Pandas_CreativeWork
 
 // ============================================================================
@@ -981,23 +980,28 @@
 	// 备注: 单次获得的经验超过 long 的有效阈值范围后就会溢出成负数, 但最新的有效经验值区间是 int64
 	#define Pandas_Fix_GainExp_Display_Overflow
 
-	// 修正 rAthena 在 status_change_start 引入的重算逻辑导致的一系列异常 [Sola丶小克]
-	// 主要包含以下两个情况:
-	// - 重算导致清空了 autospell 的防止多次执行, 在特殊构造下会导致死循环
-	//   - 将怒爆的 Cooldown 设置为 0 之后
-	//   - 穿戴一件具有 100% 触发怒爆的装备如: bonus5 bAutoSpellOnSkill,7,7,5,1000,0;
-	//   - 找个剑士使用怒爆, 则会直接导致崩溃
-	// - 重算导致在 autobonus 的 bonus script 中使用 sc_start 会导致能力重算事件被递归执行多次
-	//   - 在特殊情况下这会导致地图服务器因栈溢出而崩溃
-	//   - 让某个装备具备脚本: bonus5 bAutoSpell,20,3,1000,BF_WEAPON,1;
-	//   - 改造小青的幽魂道具 (编号: 19136) 让它脚本中的 autobonus 变成以下脚本:
-	//     - autobonus "{ sc_start SC_MONSTER_TRANSFORM,5000,1631; bonus bMatkRate,30; bonus bCritAtkRate,30; }",1000,5000,BF_WEAPON,"{ specialeffect2 EF_POTION_BERSERK; showscript "Eddga Power !"; }"; 
-	//     - autobonus "{ sc_start SC_MONSTER_TRANSFORM,5000,1631; bonus bMatkRate,30; bonus bCritAtkRate,30; bonus2 bIgnoreDefClassRate,Class_All,50; bonus2 bIgnoreMdefClassRate,Class_All,50;}", 1000, 5000, BF_MAGIC, "{ specialeffect2 EF_POTION_BERSERK; showscript "Eddga Power !"; }";
-	//   - 使用普通攻击, 可发现以下异常特征:
-	//     - 面板数据错乱
-	//     - 能力重算事件被多次重复递归调用
-	//     - 有概率的导致地图服务器堆栈溢出崩溃
-	#define Pandas_Fix_Status_Change_Start_Infinite_Recalculate_Status
+	// 修正 bonus3 bAddEffOnSkill 中 PC_BONUS_CHK_SC 带入检测参数错误的问题 [Renee]
+	#define Pandas_Fix_bouns3_bAddEffOnSkill_PC_BONUS_CHK_SC_Error
+
+	// 修正 inter_server.yml 中的 Max 超大时没有妥善处理的问题 [Sola丶小克]
+	// 启用后 Max 字段的值最多不能超过 MAX_STORAGE 的值
+	#define Pandas_Fix_INTER_SERVER_DB_Field_Verify
+
+	// 修正特殊情况下 bonus_script 拥有 BSF_REM_ON_LOGOUT 标记位,
+	// 也会在重新进入游戏时生效的问题 [Sola丶小克]
+	// 
+	// 正常情况下角色若正常退出游戏, 标记位包含 BSF_REM_ON_LOGOUT 的 bonus_script 不会被记录,
+	// 那怕由于操作仓库而导致角色数据被提前保存, 也会在角色退出的时候被清除.
+	//
+	// 但如果在包含 BSF_REM_ON_LOGOUT 的 bonus_script 记录在数据库时强制关闭地图服务器,
+	// 那么这条 bonus_script 将会保存到下次服务器启动, 并且玩家进入游戏时还有效.
+	//
+	// 解决方案: 进入游戏加载 bonus_script 的时候抛弃拥有 BSF_REM_ON_LOGOUT 标记位的数据
+	#define Pandas_Fix_Bonus_Script_Effective_Timing_Exception
+
+	// 修正 sprintf 脚本指令无法格式化 int64 数值的问题 [Sola丶小克]
+	// 注意: 即使启用此选项, 当你需要格式化 int64 的数值时依然需要使用 %lld 而不是 %d
+	#define Pandas_Fix_Sprintf_ScriptCommand_Unsupport_Int64
 #endif // Pandas_Bugfix
 
 // ============================================================================
@@ -1186,6 +1190,15 @@
 	// 使脚本引擎能够支持穿越事件队列机制, 直接执行某些事件 [Sola丶小克]
 	#define Pandas_ScriptEngine_Express
 
+	// 调整脚本引擎在 add_str 中分配内存的步进空间 [Sola丶小克]
+	// 避免过于频繁的 RECREATE 申请并移动内存中的数据, 减少内存分配开销
+	//
+	// 性能表现参考信息
+	// --------------------------------------------------------------
+	// - 调整前 str_buf  需要被重新分配 1174 次, 调整后为 37 次
+	// - 调整前 str_data 需要被重新分配 185  次, 调整后为 47 次
+	#define Pandas_ScriptEngine_AddStr_Realloc_Memory
+
 	// 使脚本引擎能够支持备份无数个脚本堆栈 [Sola丶小克]
 	// 以此避免嵌套调用超过两层的脚本会导致程序崩溃的问题 (如: script4each -> getitem -> 成就系统)
 	#define Pandas_ScriptEngine_MutliStackBackup
@@ -1214,6 +1227,10 @@
 	// 原计划输出的 "中文" 输出将变成: "中文
 	// 而最末末尾的 " 将被作为一个新的字符串起点, 导致语法检测双引号无法闭合而报错
 	#define Pandas_ScriptEngine_DoubleByte_UnEscape_Detection
+
+	// 修正 add_str 触发 str_buf 的扩容分配后 st->funcname 的所指向的指令名称无效的问题,
+	// 因为 st->funcname 指针指向的内存已在扩容分配时被释放 [Sola丶小克]
+	#define Pandas_ScriptEngine_Relocation_Funcname_After_StrBuf_Realloc
 #endif // Pandas_ScriptEngine
 
 // ============================================================================
@@ -1243,61 +1260,13 @@
 
 	// 将 barters.yml 数据库从 npc 目录移动回 db 目录 [Sola丶小克]
 	#define Pandas_UserExperience_Move_BartersYml_To_DB
+
+	// 优化加载与解析 YAML 文件时出现的一些报错体验 [Sola丶小克]
+	#define Pandas_UserExperience_Yaml_Error
+
+	// 当 YAML 数据文件中不存在 Body 节点时也依然输出结尾信息 [Sola丶小克]
+	#define Pandas_UserExperience_Output_Ending_Even_Body_Node_Is_Not_Exists
 #endif // Pandas_UserExperience
-
-// ============================================================================
-// YAML 缓存组 - Pandas_YamlBlastCache
-// ============================================================================
-
-#ifdef Pandas_YamlBlastCache
-	// 能够对 YAML 类型的数据库进行序列化缓存 [Sola丶小克]
-	#ifndef MINICORE
-		#define Pandas_YamlBlastCache_Serialize
-	#endif // MINICORE
-
-	// 以下选项开关需要依赖 Pandas_YamlBlastCache_Serialize 的拓展
-	#ifdef Pandas_YamlBlastCache_Serialize
-		// 是否启用对 ItemDatabase 的序列化支持 [Sola丶小克]
-		// 此选项需要依赖 Pandas_Struct_Item_Data_Script_Plaintext 的拓展
-		#ifdef Pandas_Struct_Item_Data_Script_Plaintext
-			#define Pandas_YamlBlastCache_ItemDatabase
-		#endif // Pandas_Struct_Item_Data_Script_Plaintext
-
-		// 是否启用对 QuestDatabase 的序列化支持 [Sola丶小克]
-		#define Pandas_YamlBlastCache_QuestDatabase
-
-		// 是否启用对 SkillDatabase 的序列化支持 [Sola丶小克]
-		#define Pandas_YamlBlastCache_SkillDatabase
-
-		// 是否启用对 MobDatabase 的序列化支持 [Sola丶小克]
-		#define Pandas_YamlBlastCache_MobDatabase
-
-		// 是否启用对 ItemGroupDatabase 的序列化支持 [Sola丶小克]
-		#define Pandas_YamlBlastCache_ItemGroupDatabase
-
-		// 是否启用对 RandomOptionDatabase 的序列化支持 [Sola]
-		// 此选项需要依赖 Pandas_Struct_S_Random_Opt_Data_With_Plaintext 的拓展
-		#ifdef Pandas_Struct_S_Random_Opt_Data_With_Plaintext
-			#define Pandas_YamlBlastCache_RandomOptionDatabase
-		#endif // Pandas_Struct_S_Random_Opt_Data_With_Plaintext
-
-		// 是否启用对 RandomOptionGroupDatabase 的序列化支持 [Sola丶小克]
-		#define Pandas_YamlBlastCache_RandomOptionGroupDatabase
-
-		// 是否启用对 JobDatabase 的序列化支持 [Sola丶小克]
-		#define Pandas_YamlBlastCache_JobDatabase
-
-		// 是否启用对 SkillTreeDatabase 的序列化支持 [Sola丶小克]
-		#define Pandas_YamlBlastCache_SkillTreeDatabase
-
-		// 是否启用对 ComboDatabase 的序列化支持 [Sola丶小克]
-		// 此选项需要依赖 Pandas_Struct_S_Item_Combo_With_Plaintext 的拓展
-		#ifdef Pandas_Struct_S_Item_Combo_With_Plaintext
-			#define Pandas_YamlBlastCache_ComboDatabase
-		#endif // Pandas_Struct_S_Item_Combo_With_Plaintext
-	#endif // Pandas_YamlBlastCache_Serialize
-#endif // Pandas_YamlBlastCache
-
 
 // ============================================================================
 // 无用代码清理组 - Pandas_Cleanup
@@ -1434,6 +1403,16 @@
 		// 事件类型: Filter / 事件名称: OnPCClickTombFilter
 		// 常量名称: NPCF_CLICKTOMB / 变量名称: clicktomb_filter_name
 		#define Pandas_NpcFilter_CLICKTOMB
+
+		// 当玩家准备将道具存入仓库时触发过滤器 [香草]
+		// 事件类型: Filter / 事件名称: OnPCStorageAddFilter
+		// 常量名称: NPCF_STORAGE_ADD / 变量名称: storage_add_filter_name
+		#define Pandas_NpcFilter_STORAGE_ADD
+
+		// 当玩家准备将道具取出仓库时触发过滤器 [香草]
+		// 事件类型: Filter / 事件名称: OnPCStorageDelFilter
+		// 常量名称: NPCF_STORAGE_DEL / 变量名称: storage_del_filter_name
+		#define Pandas_NpcFilter_STORAGE_DEL
 		// PYHELP - NPCEVENT - INSERT POINT - <Section 1>
 	#endif // Pandas_Struct_Map_Session_Data_EventHalt
 
@@ -1539,6 +1518,11 @@
 		// 事件类型: Express / 事件名称: OnPCTalkExpress
 		// 常量名称: NPCX_PC_TALK / 变量名称: pc_talk_express_name
 		#define Pandas_NpcExpress_PC_TALK
+
+		// 当玩家受到伤害并即将进行结算时触发实时事件 [人鱼姬的思念]
+		// 事件类型: Express / 事件名称: OnPCHarmedExpress
+		// 常量名称: NPCX_PCHARMED / 变量名称: pcharmed_express_name
+		#define Pandas_NpcExpress_PCHARMED
 		// PYHELP - NPCEVENT - INSERT POINT - <Section 13>
 	#endif // Pandas_ScriptEngine_Express
 	
@@ -1689,6 +1673,14 @@
 	#ifdef Pandas_Aura_Mechanism
 		#define Pandas_AtCommand_Aura
 	#endif // Pandas_Aura_Mechanism
+
+	// 是否启用 reloadlaphinedb 管理员指令 [Sola丶小克]
+	// 重新加载 Laphine 数据库 (laphine_synthesis.yml 和 laphine_upgrade.yml)
+	#define Pandas_AtCommand_ReloadLaphineDB
+
+	// 是否启用 reloadbarterdb 管理员指令 [Sola丶小克]
+	// 重新加载 Barters 以物易物数据库 (barters.yml)
+	#define Pandas_AtCommand_ReloadBarterDB
 	// PYHELP - ATCMD - INSERT POINT - <Section 1>
 #endif // Pandas_AtCommands
 
@@ -1870,8 +1862,13 @@
 	// 获取指定位置装备的租赁到期剩余秒数 (该指令有一个用于兼容的别名: isrental)
 	#define Pandas_ScriptCommand_GetEquipExpireTick
 
-	// 是否启用 getinventoryinfo 脚本指令 [Sola丶小克]
-	// 查询指定背包序号的道具的详细信息
+	// 是否启用 getinventoryinfo 系列脚本指令 [Sola丶小克]
+	// 查询指定背包、公会仓库、手推车、个人仓库/扩充仓库序号的道具详细信息
+	// 包含以下几个指令变体:
+	// getinventoryinfo <道具的背包序号>,<要查看的信息类型>{,<角色编号>};
+	// getcartinfo <道具的手推车序号>,<要查看的信息类型>{,<角色编号>};
+	// getguildstorageinfo <道具的公会仓库序号>,<要查看的信息类型>{,<角色编号>};
+	// getstorageinfo <道具的个人仓库/扩充仓库序号>,<要查看的信息类型>{{,<仓库编号>},<角色编号>};
 	#define Pandas_ScriptCommand_GetInventoryInfo
 
 	// 是否启用 statuscheck 脚本指令 [Sola丶小克]
@@ -2130,6 +2127,32 @@
 	// 是否启用 getrateidx 脚本指令 [Sola丶小克]
 	// 随机获取一个数值型数组的索引序号, 数组中每个元素的值为权重值
 	#define Pandas_ScriptCommand_GetRateIdx
+
+	// 是否启用 getbossinfo 脚本指令 [Sola丶小克]
+	// 该指令用于查询 BOSS 魔物重生时间及其坟墓等信息
+	#define Pandas_ScriptCommand_GetBossInfo
+
+	// 是否启用 whodropitem 脚本指令 [Sola丶小克]
+	// 该指令用于查询指定道具会从哪些魔物身上掉落以及掉落的机率信息
+	#define Pandas_ScriptCommand_WhoDropItem
+
+	// 是否扩充 getinventorylist 脚本指令 [Sola丶小克]
+	// 主要包括了查询返回值的信息扩充, 衍生查询仓库和手推车的变体指令, 可控制每次需要被赋值的具体数组
+	// 
+	// - 查询返回值的信息扩充相比 rAthena 多返回以下内容
+	//	 - @inventorylist_uid$[]
+	//   - @inventorylist_equipswitch[]
+	// 
+	// - 衍生查询仓库和手推车的变体指令
+	//   - getstoragelist;
+	//   - getguildstoragelist;
+	//   - getcartlist;
+	// 
+	// - 可控制每次想查询的数据类型
+	//   - 用于解决仓库和背包容量超大时候填充大量不使用的数据带来的性能问题
+	//
+	// 更多详细用法请移步 doc/pandas_script_commands.txt 文件
+	#define Pandas_ScriptCommand_GetInventoryList
 	// PYHELP - SCRIPTCMD - INSERT POINT - <Section 1>
 #endif // Pandas_ScriptCommands
 
@@ -2150,9 +2173,6 @@
 // ============================================================================
 
 #ifdef Pandas_ScriptResults
-	// 是否拓展 getinventorylist 脚本指令的返回数组 [Sola丶小克]
-	#define Pandas_ScriptResults_GetInventoryList
-
 	// 使 OnSellItem 标签可以返回被出售道具的背包序号 [Sola丶小克]
 	#define Pandas_ScriptResults_OnSellItem
 #endif // Pandas_ScriptResults
